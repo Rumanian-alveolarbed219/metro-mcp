@@ -1,21 +1,6 @@
 import { z } from 'zod';
 import { definePlugin } from '../plugin.js';
-
-// Shared fiber root setup — embedded at the top of each injected IIFE.
-// `return null` exits the IIFE if the hook or roots aren't available.
-const FIBER_ROOT_JS = `
-  var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-  if (!hook || !hook.getFiberRoots) return null;
-  var fiberRoots;
-  try {
-    for (var i = 1; i <= 5; i++) {
-      fiberRoots = hook.getFiberRoots(i);
-      if (fiberRoots && fiberRoots.size > 0) break;
-    }
-  } catch(e) { return null; }
-  if (!fiberRoots || fiberRoots.size === 0) return null;
-  var rootFiber = Array.from(fiberRoots)[0].current;
-`;
+import { FIBER_ROOT_JS } from '../utils/fiber.js';
 
 // Module-level caches — persist across tool handler calls for the lifetime of the server.
 let idbAvailableCache: boolean | null = null;

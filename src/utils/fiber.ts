@@ -1,0 +1,91 @@
+/**
+ * Shared fiber tree utilities used across plugins.
+ *
+ * JS string constants are embedded into evalInApp() calls, so they must be
+ * valid JavaScript and cannot reference TypeScript imports.
+ */
+
+/**
+ * Inline JS snippet that resolves `rootFiber` from the React DevTools hook.
+ * Embed at the top of an IIFE; uses `return` to exit early on failure.
+ * The early-return value should match the IIFE's failure sentinel (null or []).
+ */
+export const FIBER_ROOT_JS = `
+  var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+  if (!hook || !hook.getFiberRoots) return null;
+  var fiberRoots;
+  try {
+    for (var i = 1; i <= 5; i++) {
+      fiberRoots = hook.getFiberRoots(i);
+      if (fiberRoots && fiberRoots.size > 0) break;
+    }
+  } catch(e) { return null; }
+  if (!fiberRoots || fiberRoots.size === 0) return null;
+  var rootFiber = Array.from(fiberRoots)[0].current;
+`;
+
+/**
+ * Complete standalone IIFE that collects testable elements from the fiber tree.
+ * Returns an array of { name, testID, accessibilityLabel, accessibilityRole, text, interactive }.
+ * Uses an iterative stack to safely handle deep navigation trees (depth 200+).
+ */
+export const COLLECT_ELEMENTS_JS = `
+  (function() {
+    var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
+    if (!hook || !hook.getFiberRoots) return [];
+    var fiberRoots;
+    try {
+      for (var i = 1; i <= 5; i++) {
+        fiberRoots = hook.getFiberRoots(i);
+        if (fiberRoots && fiberRoots.size > 0) break;
+      }
+    } catch(e) { return []; }
+    if (!fiberRoots || fiberRoots.size === 0) return [];
+    var rootFiber = Array.from(fiberRoots)[0].current;
+    var elements = [];
+    var seen = {};
+    var stack = [{ f: rootFiber, d: 0 }];
+    while (stack.length) {
+      var item = stack.pop();
+      var fiber = item.f; var depth = item.d;
+      if (!fiber || depth > 200) continue;
+      var type = fiber.type;
+      var name = typeof type === 'string' ? type : (type && (type.displayName || type.name));
+      if (name && name.indexOf('RCT') !== 0) {
+        var props = fiber.memoizedProps || {};
+        var testID = props.testID || null;
+        var label = props.accessibilityLabel || props['aria-label'] || null;
+        var key = testID || label;
+        if ((testID || label || typeof props.children === 'string') && (!key || !seen[key])) {
+          if (key) seen[key] = true;
+          elements.push({
+            name: name,
+            testID: testID,
+            accessibilityLabel: label,
+            accessibilityRole: props.accessibilityRole || props['role'] || null,
+            text: typeof props.children === 'string' ? props.children : null,
+            interactive: !!(props.onPress || props.onPressIn || props.onClick),
+          });
+        }
+      }
+      if (fiber.sibling) stack.push({ f: fiber.sibling, d: depth });
+      if (fiber.child) stack.push({ f: fiber.child, d: depth + 1 });
+    }
+    return elements;
+  })()
+`;
+
+export interface TestableElement {
+  name: string;
+  testID?: string;
+  accessibilityLabel?: string;
+  accessibilityRole?: string;
+  text?: string;
+  interactive?: boolean;
+}
+
+type EvalFn = (expr: string, opts?: { timeout?: number; awaitPromise?: boolean }) => Promise<unknown>;
+
+export async function collectElements(evalInApp: EvalFn): Promise<TestableElement[]> {
+  return ((await evalInApp(COLLECT_ELEMENTS_JS, { timeout: 5000 })) as TestableElement[]) ?? [];
+}

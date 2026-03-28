@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { definePlugin } from '../plugin.js';
+import { collectElements, type TestableElement } from '../utils/fiber.js';
 
 export const maestroPlugin = definePlugin({
   name: 'maestro',
@@ -7,57 +8,9 @@ export const maestroPlugin = definePlugin({
   description: 'Maestro test flow generation from component tree data',
 
   async setup(ctx) {
-    async function getTestableElements(): Promise<Array<{
-      name: string;
-      testID?: string;
-      accessibilityLabel?: string;
-      text?: string;
-    }>> {
-      const expr = `
-        (function() {
-          var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-          if (!hook || !hook.getFiberRoots) return [];
-          var fiberRoots;
-          for (var i = 1; i <= 5; i++) {
-            fiberRoots = hook.getFiberRoots(i);
-            if (fiberRoots && fiberRoots.size > 0) break;
-          }
-          if (!fiberRoots) return [];
-          var rootFiber = Array.from(fiberRoots)[0].current;
-          var elements = [];
-
-          function walk(fiber) {
-            if (!fiber) return;
-            var name = fiber.type?.displayName || fiber.type?.name;
-            if (name) {
-              var props = fiber.memoizedProps || {};
-              var el = { name: name };
-              if (props.testID) el.testID = props.testID;
-              if (props.accessibilityLabel) el.accessibilityLabel = props.accessibilityLabel;
-              if (typeof props.children === 'string') el.text = props.children;
-              if (props.onPress) el.interactive = true;
-              if (el.testID || el.accessibilityLabel || el.text || el.interactive) {
-                elements.push(el);
-              }
-            }
-            walk(fiber.child);
-            walk(fiber.sibling);
-          }
-          walk(rootFiber);
-          return elements;
-        })()
-      `;
-      return ((await ctx.evalInApp(expr, { timeout: 5000 })) as Array<{
-        name: string;
-        testID?: string;
-        accessibilityLabel?: string;
-        text?: string;
-      }>) || [];
-    }
-
     ctx.registerTool('generate_maestro_flow', {
       description:
-        'Generate a Maestro test flow (YAML) from a description of user actions. Uses the current screen\'s component tree to find correct selectors.',
+        "Generate a Maestro test flow (YAML) from a description of user actions. Uses the current screen's component tree to find correct selectors.",
       parameters: z.object({
         description: z.string().describe(
           'Description of the test flow (e.g., "Tap the login button, enter email, tap submit")'
@@ -66,52 +19,42 @@ export const maestroPlugin = definePlugin({
         includeAssertions: z.boolean().default(true).describe('Include assertVisible assertions'),
       }),
       handler: async ({ description, appId, includeAssertions }) => {
-        const elements = await getTestableElements();
+        const elements = await collectElements(ctx.evalInApp.bind(ctx));
 
-        // Build a selector map for the AI to reference
-        const selectorMap = elements.map((el) => {
-          const selector = el.testID
-            ? `id: "${el.testID}"`
-            : el.accessibilityLabel
-            ? `id: "${el.accessibilityLabel}"`
-            : el.text
-            ? `text: "${el.text}"`
-            : null;
-          return selector ? `${el.name}: ${selector}` : null;
-        }).filter(Boolean);
+        function toSelector(el: TestableElement): string | null {
+          if (el.testID) return `id: "${el.testID}"`;
+          if (el.accessibilityLabel) return `id: "${el.accessibilityLabel}"`;
+          if (el.text) return `text: "${el.text}"`;
+          return null;
+        }
 
-        // Generate YAML flow
+        function findElement(step: string): TestableElement | undefined {
+          const lower = step.toLowerCase();
+          return elements.find((el) => {
+            const candidates = [el.testID, el.accessibilityLabel, el.text, el.name]
+              .filter(Boolean)
+              .map((s) => s!.toLowerCase());
+            return candidates.some((c) => lower.includes(c));
+          });
+        }
+
         const lines: string[] = [];
         if (appId) lines.push(`appId: ${appId}`);
         lines.push('---');
         lines.push(`# Generated from: ${description}`);
-        lines.push(`# Available selectors on current screen:`);
-        for (const sel of selectorMap.slice(0, 20)) {
-          lines.push(`#   ${sel}`);
+        lines.push('# Available selectors on current screen:');
+        for (const el of elements.slice(0, 20)) {
+          const sel = toSelector(el);
+          if (sel) lines.push(`#   ${el.name}: ${sel}`);
         }
         lines.push('');
 
-        // Parse the description into steps
         const steps = description.split(/[,;.]/).map((s) => s.trim()).filter(Boolean);
 
         for (const step of steps) {
           const lowerStep = step.toLowerCase();
-
-          // Match against available elements
-          const matchingEl = elements.find((el) => {
-            const elName = (el.testID || el.accessibilityLabel || el.text || el.name).toLowerCase();
-            return lowerStep.includes(elName);
-          });
-
-          const selector = matchingEl
-            ? matchingEl.testID
-              ? `id: "${matchingEl.testID}"`
-              : matchingEl.accessibilityLabel
-              ? `id: "${matchingEl.accessibilityLabel}"`
-              : matchingEl.text
-              ? `text: "${matchingEl.text}"`
-              : null
-            : null;
+          const matchingEl = findElement(step);
+          const selector = matchingEl ? toSelector(matchingEl) : null;
 
           if (lowerStep.includes('tap') || lowerStep.includes('click') || lowerStep.includes('press')) {
             if (selector) {
@@ -131,7 +74,8 @@ export const maestroPlugin = definePlugin({
             }
             lines.push(`- inputText: "${text}"`);
           } else if (lowerStep.includes('swipe')) {
-            const dir = lowerStep.includes('up') ? 'UP' : lowerStep.includes('down') ? 'DOWN' : lowerStep.includes('left') ? 'LEFT' : 'RIGHT';
+            const dir = lowerStep.includes('up') ? 'UP' : lowerStep.includes('down') ? 'DOWN'
+              : lowerStep.includes('left') ? 'LEFT' : 'RIGHT';
             lines.push(`- swipe${dir.charAt(0) + dir.slice(1).toLowerCase()}`);
           } else if (lowerStep.includes('wait')) {
             const timeMatch = step.match(/(\d+)/);
@@ -177,15 +121,12 @@ export const maestroPlugin = definePlugin({
       }),
       handler: async ({ action }) => {
         if (action === 'start') {
-          // Inject a recording hook
           await ctx.evalInApp(`
             (function() {
               globalThis.__METRO_MCP_RECORDING__ = [];
-              // Patch console to capture navigation events
               var origNav = console.info;
               console.info = function() {
-                var args = Array.from(arguments);
-                var msg = args.join(' ');
+                var msg = Array.from(arguments).join(' ');
                 if (msg.includes('navigate') || msg.includes('press') || msg.includes('tap')) {
                   globalThis.__METRO_MCP_RECORDING__.push({
                     time: Date.now(),
@@ -215,7 +156,6 @@ export const maestroPlugin = definePlugin({
           for (const event of events) {
             lines.push(`# ${(event as Record<string, unknown>).description}`);
           }
-
           return lines.join('\n');
         }
       },

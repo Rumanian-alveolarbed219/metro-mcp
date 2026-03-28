@@ -34,6 +34,7 @@ import { navigationPlugin } from './plugins/navigation.js';
 import { accessibilityPlugin } from './plugins/accessibility.js';
 import { commandsPlugin } from './plugins/commands.js';
 import { maestroPlugin } from './plugins/maestro.js';
+import { appiumPlugin } from './plugins/appium.js';
 import { promptsPlugin } from './plugins/prompts.js';
 
 const logger = createLogger('server');
@@ -56,6 +57,7 @@ const BUILT_IN_PLUGINS: PluginDefinition[] = [
   accessibilityPlugin,
   commandsPlugin,
   maestroPlugin,
+  appiumPlugin,
   promptsPlugin,
 ];
 

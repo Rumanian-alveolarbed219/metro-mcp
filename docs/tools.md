@@ -112,6 +112,11 @@ All tools use the CDP fiber tree first, falling back to `simctl`/`adb`, then IDB
 - **`generate_maestro_flow`** — Generate Maestro YAML from a test description.
 - **`record_interaction`** — Start/stop recording for Maestro flow generation.
 
+## Appium
+
+- **`generate_appium_test`** — Generate a WebdriverIO + Jest test file from a plain-English description. Uses the live component tree to build accurate `~accessibility_id` selectors. Supports iOS, Android, or both.
+- **`record_appium_interactions`** — Patch `onPress` handlers in the fiber tree to record taps, then output them as `driver.$('~id').click()` calls inside an `it()` block.
+
 ## Token-Efficient Output
 
 All tools support modifiers to reduce context window usage:
