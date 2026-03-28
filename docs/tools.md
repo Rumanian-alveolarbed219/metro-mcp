@@ -1,0 +1,149 @@
+# Tools Reference
+
+## Console
+
+- **`get_console_logs`** — Get recent console output. Filter by `level` (log/warn/error/info/debug), `search` text, `limit`. Supports `summary` and `compact` modes.
+- **`clear_console_logs`** — Clear the log buffer.
+
+## Network
+
+- **`get_network_requests`** — Get buffered HTTP requests with method, URL, status, timing.
+- **`get_request_details`** — Get full headers and body for a specific request by URL.
+- **`search_network`** — Filter by URL pattern, method, status code, or errors only.
+
+## Errors
+
+- **`get_errors`** — Get uncaught exceptions with symbolicated stack traces.
+- **`clear_errors`** — Clear the error buffer.
+
+## Evaluate
+
+- **`evaluate_js`** — Execute any JavaScript expression in the running app and return the result. Supports async/await.
+
+## Device
+
+- **`list_devices`** — List connected debuggable targets from Metro.
+- **`get_app_info`** — Bundle URL, platform, device name, VM type.
+- **`get_connection_status`** — CDP connection state and Metro status.
+
+## Source
+
+- **`symbolicate`** — Convert minified stack traces to original source locations.
+
+## Redux
+
+> No app changes needed for basic state inspection.
+
+- **`get_redux_state`** — Get the full state tree or a specific slice via dot-path (e.g., `user.profile`).
+- **`dispatch_redux_action`** — Dispatch an action to the Redux store.
+- **`get_redux_actions`** — Get recent dispatched actions (real-time with client SDK).
+
+## Components
+
+> No app changes needed.
+
+- **`get_component_tree`** — Get the React component tree. Use `structureOnly=true` for compact output (~1-3KB).
+- **`find_components`** — Search by component name pattern.
+- **`inspect_component`** — Get detailed props, state, and hooks for a specific component.
+- **`get_testable_elements`** — List all elements with `testID` or `accessibilityLabel`.
+
+## Storage
+
+> No app changes needed.
+
+- **`get_storage_keys`** — List all AsyncStorage keys.
+- **`get_storage_item`** — Read a specific key value.
+- **`get_all_storage`** — Dump all key-value pairs.
+
+## Bundle
+
+- **`get_bundle_status`** — Metro server status and health check.
+- **`get_bundle_errors`** — Compilation/transform errors with file paths.
+
+## Simulator
+
+- **`take_screenshot`** — Capture simulator/device screenshot.
+- **`list_simulators`** — List iOS simulators and Android emulators.
+- **`install_certificate`** — Add root certificate to device.
+- **`get_native_logs`** — Native logs (iOS syslog / Android logcat).
+- **`app_lifecycle`** — Launch, terminate, install, uninstall apps.
+- **`get_screen_orientation`** — Get current orientation.
+
+## Deep Link
+
+- **`open_deeplink`** — Open a URL or deep link on the device.
+- **`list_url_schemes`** — List registered URL schemes.
+
+## UI Interact
+
+All tools use the CDP fiber tree first, falling back to `simctl`/`adb`, then IDB as a last resort. IDB is optional — tools will prompt you to install it when needed.
+
+- **`list_elements`** — Get interactive elements from the React component tree (labels, testIDs, roles). No IDB needed.
+- **`tap_element`** — Tap by label/testID (CDP fiber tree) or coordinates (simctl/adb → IDB fallback).
+- **`type_text`** — Type into a TextInput by testID/label or the first visible input (CDP → adb → IDB).
+- **`long_press`** — Long press by label/testID (CDP) or coordinates (adb → IDB).
+- **`swipe`** — Scroll/swipe in a direction (CDP ScrollView → adb → IDB).
+- **`press_button`** — Press HOME (simctl), BACK/ENTER/DELETE (CDP + adb), VOLUME/POWER (adb → IDB).
+
+## Navigation
+
+> No app changes needed.
+
+- **`get_navigation_state`** — Full React Navigation / Expo Router state.
+- **`get_current_route`** — Currently focused route name and params.
+- **`get_route_history`** — Navigation back stack.
+- **`list_routes`** — All registered route names.
+
+## Accessibility
+
+> No app changes needed.
+
+- **`audit_accessibility`** — Full screen audit for missing labels, roles, testIDs, alt text.
+- **`check_element_accessibility`** — Deep check on a specific component.
+- **`get_accessibility_summary`** — Counts overview of accessibility coverage.
+
+## Commands
+
+- **`list_commands`** — List custom commands registered by the app.
+- **`run_command`** — Execute a custom command with parameters.
+
+## Maestro
+
+- **`generate_maestro_flow`** — Generate Maestro YAML from a test description.
+- **`record_interaction`** — Start/stop recording for Maestro flow generation.
+
+## Token-Efficient Output
+
+All tools support modifiers to reduce context window usage:
+
+| Modifier | Effect |
+|----------|--------|
+| `summary: true` | Counts + last N items |
+| `structureOnly: true` | Component tree without props/state (~1-3KB) |
+| `compact: true` | Single-line compressed format (30–50% smaller) |
+| `maxLength: number` | Truncate long values |
+| `limit: number` | Cap number of results |
+
+## Resources
+
+| URI | Description |
+|-----|-------------|
+| `metro://logs` | Live console log stream |
+| `metro://network` | Live network request stream |
+| `metro://errors` | Live error stream |
+| `metro://status` | Connection status |
+| `metro://redux/state` | Redux state snapshot |
+| `metro://navigation` | Navigation state |
+| `metro://bundle/status` | Metro bundle status |
+
+## Prompts
+
+| Name | Description |
+|------|-------------|
+| `debug-app` | General debugging session |
+| `debug-errors` | Error investigation workflow |
+| `debug-performance` | Performance analysis |
+| `diagnose-network` | Network issue diagnosis |
+| `trace-action` | Trace user action through state + network |
+| `generate-tests` | Generate Maestro tests from current screen |
+| `audit-accessibility` | Accessibility audit with fixes |
