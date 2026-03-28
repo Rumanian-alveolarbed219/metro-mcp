@@ -70,9 +70,9 @@ metro-mcp connects to your running Metro dev server the same way Chrome DevTools
 | **accessibility** | 3 | Accessibility auditing |
 | **commands** | 2 | Custom app commands |
 | **maestro** | 2 | Maestro test flow generation |
-| **appium** | 2 | Appium/WebdriverIO Jest test generation |
+| **appium** | 3 | Appium/WebdriverIO Jest test generation |
 
-**Total: 49 tools, 7 resources, 7 prompts** — see the [full tools reference](docs/tools.md).
+**Total: 50 tools, 7 resources, 7 prompts** — see the [full tools reference](docs/tools.md).
 
 ## App Integration (Optional)
 

@@ -115,7 +115,8 @@ All tools use the CDP fiber tree first, falling back to `simctl`/`adb`, then IDB
 ## Appium
 
 - **`generate_appium_test`** — Generate a WebdriverIO + Jest test file from a plain-English description. Uses the live component tree to build accurate `~accessibility_id` selectors. Supports iOS, Android, or both.
-- **`record_appium_interactions`** — Patch `onPress` handlers in the fiber tree to record taps, then output them as `driver.$('~id').click()` calls inside an `it()` block.
+- **`record_appium_interactions`** — Snapshot-based recorder. Call `start`, perform an action, call `step` with a description, repeat, then `stop` to get a ready-to-run `it()` block. Reads live selectors after each action — no native event interception needed.
+- **`generate_wdio_config`** — Generate a minimal `wdio.conf.ts` for Appium + React Native, including the install command for all required packages.
 
 ## Token-Efficient Output
 
