@@ -376,6 +376,8 @@ export const uiInteractPlugin = definePlugin({
         const p = platform === 'auto' ? await detectPlatform() : platform;
         if (!p) return 'No simulator/emulator detected.';
 
+        let result: string | null = null;
+
         // ── CDP: find ScrollView and invoke scrollTo on its native node ────────
         const jsDir = JSON.stringify(direction);
         const scrolled = await ctx.evalInApp(`
@@ -421,27 +423,48 @@ export const uiInteractPlugin = definePlugin({
             return false;
           })()
         `).catch(() => false);
-        if (scrolled) return `Swiped ${direction}`;
+        if (scrolled) result = `Swiped ${direction}`;
 
-        // ── Native fallbacks (fixed midpoint coordinates) ─────────────────────
-        const coords: Record<string, [number, number, number, number]> = {
-          up:    [500, 1500, 500,  500],
-          down:  [500,  500, 500, 1500],
-          left:  [800, 1000, 200, 1000],
-          right: [200, 1000, 800, 1000],
-        };
-        const [sx, sy, ex, ey] = coords[direction];
+        if (!result) {
+          // ── Native fallbacks (fixed midpoint coordinates) ───────────────────
+          const coords: Record<string, [number, number, number, number]> = {
+            up:    [500, 1500, 500,  500],
+            down:  [500,  500, 500, 1500],
+            left:  [800, 1000, 200, 1000],
+            right: [200, 1000, 800, 1000],
+          };
+          const [sx, sy, ex, ey] = coords[direction];
 
-        if (p === 'android') {
-          await ctx.exec(`adb shell input swipe ${sx} ${sy} ${ex} ${ey} 300`);
-          return `Swiped ${direction}`;
+          if (p === 'android') {
+            await ctx.exec(`adb shell input swipe ${sx} ${sy} ${ex} ${ey} 300`);
+            result = `Swiped ${direction}`;
+          } else if (!(await isIDBAvailable())) {
+            return `Swipe requires IDB on iOS. ${IDB_INSTALL}`;
+          } else {
+            await ctx.exec(`idb ui swipe ${sx} ${sy} ${ex} ${ey} --udid booted`);
+            result = `Swiped ${direction}`;
+          }
         }
 
-        if (!(await isIDBAvailable())) {
-          return `Swipe requires IDB on iOS. ${IDB_INSTALL}`;
-        }
-        await ctx.exec(`idb ui swipe ${sx} ${sy} ${ex} ${ey} --udid booted`);
-        return `Swiped ${direction}`;
+        // ── Log to test recorder if a recording is active ─────────────────────
+        await ctx.evalInApp(`
+          (function() {
+            if (!globalThis.__METRO_MCP_REC_ACTIVE__) return;
+            var getRoute = function() {
+              try {
+                var n = globalThis.__METRO_MCP_NAV_REF__;
+                if (n && n.getCurrentRoute) { var r = n.getCurrentRoute(); return r ? r.name : null; }
+              } catch(e) {}
+              return null;
+            };
+            globalThis.__METRO_MCP_REC_EVENTS__.push({
+              type: 'swipe', direction: ${JSON.stringify(direction)},
+              route: getRoute(), timestamp: Date.now()
+            });
+          })()
+        `, { timeout: 2000 }).catch(() => {});
+
+        return result;
       },
     });
 
