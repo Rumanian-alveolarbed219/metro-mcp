@@ -54,6 +54,13 @@ export function formatTimestamp(ts: number): string {
 }
 
 /**
+ * Escape a string for safe embedding inside a JS single-quoted string literal.
+ */
+export function escapeJsString(str: string): string {
+  return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+/**
  * Format bytes to human-readable string.
  */
 export function formatBytes(bytes: number): string {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { definePlugin } from '../plugin.js';
+import { escapeJsString } from '../utils/format.js';
 
 interface AccessibilityIssue {
   component: string;
@@ -169,8 +170,8 @@ export const accessibilityPlugin = definePlugin({
       }),
       handler: async ({ name, testID }) => {
         const searchBy = testID
-          ? `props.testID === '${testID.replace(/'/g, "\\'")}'`
-          : `(fiber.type?.displayName || fiber.type?.name) === '${(name || '').replace(/'/g, "\\'")}'`;
+          ? `props.testID === '${escapeJsString(testID)}'`
+          : `(fiber.type?.displayName || fiber.type?.name) === '${escapeJsString(name || '')}'`;
 
         const expr = `
           (function() {

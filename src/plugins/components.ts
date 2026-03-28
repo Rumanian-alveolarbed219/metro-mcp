@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { definePlugin } from '../plugin.js';
+import { escapeJsString } from '../utils/format.js';
 
 // JS expression to walk the React fiber tree
 const WALK_FIBER_EXPR = `
@@ -174,7 +175,7 @@ export const componentsPlugin = definePlugin({
             function find(fiber) {
               if (!fiber) return;
               var n = fiber.type?.displayName || fiber.type?.name;
-              if (n === '${name.replace(/'/g, "\\'")}') { target = fiber; return; }
+              if (n === '${escapeJsString(name)}') { target = fiber; return; }
               find(fiber.child);
               if (!target) find(fiber.sibling);
             }

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { definePlugin } from '../plugin.js';
+import { escapeJsString } from '../utils/format.js';
 
 export const storagePlugin = definePlugin({
   name: 'storage',
@@ -34,7 +35,7 @@ export const storagePlugin = definePlugin({
         key: z.string().describe('AsyncStorage key to read'),
       }),
       handler: async ({ key }) => {
-        const escapedKey = key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const escapedKey = escapeJsString(key);
         const result = await ctx.evalInApp(`
           (async function() {
             try {

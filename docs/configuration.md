@@ -11,7 +11,9 @@
 ## CLI Arguments
 
 ```bash
-metro-mcp --host 192.168.1.100 --port 19000
+npx -y metro-mcp --host 192.168.1.100 --port 19000
+# or
+bunx metro-mcp --host 192.168.1.100 --port 19000
 ```
 
 ## Config File

@@ -1,5 +1,8 @@
 # metro-mcp
 
+[![Install in VS Code](https://img.shields.io/badge/Install_in-VS_Code-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=metro-mcp&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22metro-mcp%22%5D%2C%22env%22%3A%7B%7D%7D)
+[![Install in Cursor](https://img.shields.io/badge/Install_in-Cursor-000000?style=flat-square&logoColor=white)](https://cursor.com/en/install-mcp?name=metro-mcp&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIm1ldHJvLW1jcCJdLCJlbnYiOnt9fQ==)
+
 A plugin-based MCP server for React Native runtime debugging, inspection, and automation. Connects to Metro bundler via Chrome DevTools Protocol — **no app code changes needed** for most features.
 
 Works with **Expo**, **bare React Native**, and any project using **Metro + Hermes**.
@@ -9,10 +12,25 @@ Works with **Expo**, **bare React Native**, and any project using **Metro + Herm
 ### Claude Code
 
 ```bash
+claude mcp add metro-mcp -- npx -y metro-mcp
+# or with Bun
 claude mcp add metro-mcp -- bunx metro-mcp
 ```
 
 ### Cursor / VS Code
+
+```json
+{
+  "mcpServers": {
+    "metro-mcp": {
+      "command": "npx",
+      "args": ["-y", "metro-mcp"]
+    }
+  }
+}
+```
+
+Or with Bun:
 
 ```json
 {
@@ -28,12 +46,12 @@ claude mcp add metro-mcp -- bunx metro-mcp
 ### With custom Metro port
 
 ```bash
-claude mcp add metro-mcp -- bunx metro-mcp --port 19000
+claude mcp add metro-mcp -- npx -y metro-mcp --port 19000
 ```
 
 ## Requirements
 
-- **Bun** 1.0+ (runtime)
+- **Node.js** 18+ or **Bun** 1.0+
 - **iOS**: Xcode 14+ with Simulator (`xcrun simctl` is used for most operations)
 - **Android**: Android SDK with `adb` on your PATH
 - **IDB** *(optional)*: Some iOS operations fall back to [IDB (idb-companion)](https://github.com/facebook/idb) — install with `brew install idb-companion`. Tools will tell you when IDB is needed.
@@ -117,7 +135,7 @@ metro-mcp is fully extensible. See the [plugins guide](docs/plugins.md) to build
 
 - **React Native**: 0.70+ (Hermes required)
 - **Expo**: SDK 49+
-- **Runtime**: Bun 1.0+
+- **Runtime**: Node.js 18+ or Bun 1.0+
 - **Platforms**: iOS Simulator, Android Emulator, physical devices via USB
 
 ## License
