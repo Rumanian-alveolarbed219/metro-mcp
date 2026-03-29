@@ -16,7 +16,10 @@ const CURRENT_ROUTE_JS = `
   })()
 `;
 
-// ── JS injected into the app runtime to intercept interactions via fiber patching.
+// ── JS injected into the app runtime to intercept interactions.
+// React Native (Hermes, dev mode) calls Object.freeze(props) inside createElement
+// while props are still mutable. We intercept Object.freeze to wrap handlers at
+// that moment — no need to find React or mutate already-frozen memoizedProps.
 const START_RECORDING_JS = `
 (function() {
   var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
@@ -24,127 +27,163 @@ const START_RECORDING_JS = `
 
   globalThis.__METRO_MCP_REC_EVENTS__ = [];
   globalThis.__METRO_MCP_REC_ACTIVE__ = true;
-  var patched = new WeakSet();
 
   ${GET_ROUTE_FUNC_JS}
 
-  function patchFibers(rootFiber) {
-    var stack = [{ f: rootFiber, d: 0 }];
+  // ── Intercept Object.freeze: wrap event handlers before React freezes props ──
+  var origFreeze = Object.freeze;
+  Object.freeze = function(obj) {
+    if (globalThis.__METRO_MCP_REC_ACTIVE__ && obj && typeof obj === 'object' && !Array.isArray(obj) && !obj.__mcpRec) {
+      var tid = obj.testID || null;
+      var lbl = obj.accessibilityLabel || obj['aria-label'] || null;
+
+      var wrapped = false;
+      if (typeof obj.onPress === 'function') {
+        var op = obj.onPress;
+        obj.onPress = function(e) {
+          if (globalThis.__METRO_MCP_REC_ACTIVE__)
+            globalThis.__METRO_MCP_REC_EVENTS__.push({ type: 'tap', testID: tid, label: lbl, route: getRoute(), timestamp: Date.now() });
+          return op.call(this, e);
+        };
+        wrapped = true;
+      }
+      if (typeof obj.onLongPress === 'function') {
+        var olp = obj.onLongPress;
+        obj.onLongPress = function(e) {
+          if (globalThis.__METRO_MCP_REC_ACTIVE__)
+            globalThis.__METRO_MCP_REC_EVENTS__.push({ type: 'long_press', testID: tid, label: lbl, route: getRoute(), timestamp: Date.now() });
+          return olp.call(this, e);
+        };
+        wrapped = true;
+      }
+      if (typeof obj.onChangeText === 'function') {
+        var oct = obj.onChangeText;
+        obj.onChangeText = function(val) {
+          if (globalThis.__METRO_MCP_REC_ACTIVE__)
+            globalThis.__METRO_MCP_REC_EVENTS__.push({ type: 'type', testID: tid, label: lbl, text: val, route: getRoute(), timestamp: Date.now() });
+          return oct.call(this, val);
+        };
+        wrapped = true;
+      }
+      if (typeof obj.onSubmitEditing === 'function') {
+        var ose = obj.onSubmitEditing;
+        obj.onSubmitEditing = function(e) {
+          if (globalThis.__METRO_MCP_REC_ACTIVE__)
+            globalThis.__METRO_MCP_REC_EVENTS__.push({ type: 'submit', testID: tid, label: lbl, route: getRoute(), timestamp: Date.now() });
+          return ose.call(this, e);
+        };
+        wrapped = true;
+      }
+      // Detect scroll containers: check for ScrollView/KeyboardAwareScrollView-specific
+      // props. Using 'in' (not !== undefined) catches props explicitly set to undefined.
+      // obj is already confirmed to be a non-array object via the outer guard
+      var isScrollable =
+        'scrollEventThrottle'            in obj ||
+        'extraScrollHeight'              in obj ||
+        'showsVerticalScrollIndicator'   in obj ||
+        'showsHorizontalScrollIndicator' in obj ||
+        'keyboardShouldPersistTaps'      in obj ||
+        'keyboardDismissMode'            in obj ||
+        'scrollEnabled'                  in obj ||
+        typeof obj.onScrollBeginDrag === 'function' ||
+        typeof obj.onScrollEndDrag   === 'function';
+      if (isScrollable) {
+        var scrollStart = { x: null, y: null };
+        var origBegin       = obj.onScrollBeginDrag   || null;
+        var origEnd         = obj.onScrollEndDrag     || null;
+        var origMomentumEnd = obj.onMomentumScrollEnd || null;
+        obj.onScrollBeginDrag = function(e) {
+          scrollStart.x = e.nativeEvent.contentOffset.x;
+          scrollStart.y = e.nativeEvent.contentOffset.y;
+          if (origBegin) origBegin.call(this, e);
+        };
+        var emitSwipeIfMoved = function(e) {
+          if (scrollStart.x !== null && globalThis.__METRO_MCP_REC_ACTIVE__) {
+            var dx = e.nativeEvent.contentOffset.x - scrollStart.x;
+            var dy = e.nativeEvent.contentOffset.y - scrollStart.y;
+            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+              var dir = Math.abs(dx) > Math.abs(dy)
+                ? (dx > 0 ? 'left' : 'right')
+                : (dy > 0 ? 'up'   : 'down');
+              var evts = globalThis.__METRO_MCP_REC_EVENTS__;
+              var last = evts[evts.length - 1];
+              if (!(last && last.type === 'swipe' && Date.now() - last.timestamp < 100))
+                evts.push({ type: 'swipe', direction: dir, testID: tid, route: getRoute(), timestamp: Date.now() });
+            }
+            scrollStart.x = null;
+          }
+        };
+        obj.onScrollEndDrag = function(e) {
+          emitSwipeIfMoved(e);
+          if (origEnd) origEnd.call(this, e);
+        };
+        obj.onMomentumScrollEnd = function(e) {
+          emitSwipeIfMoved(e);
+          if (origMomentumEnd) origMomentumEnd.call(this, e);
+        };
+        wrapped = true;
+      }
+      if (wrapped) obj.__mcpRec = true;
+    }
+    return origFreeze.call(this, obj);
+  };
+
+  // ── Force re-render of already-mounted scroll containers ────────────────────
+  // Object.freeze only fires on future renders. For scroll views mounted before
+  // recording started, we trigger a one-time re-render so our freeze interceptor
+  // can wrap their handlers.
+  (function() {
+    var renderer = null;
+    hook.renderers.forEach(function(r) { if (!renderer) renderer = r; });
+
+    function isScrollFiber(fiber) {
+      var cn = typeof fiber.type === 'string'
+        ? fiber.type
+        : (fiber.type && (fiber.type.displayName || fiber.type.name)) || '';
+      // String checks before regex — faster for the common case
+      if (cn === 'ScrollView' || cn === 'FlatList' || cn === 'SectionList' ||
+          cn === 'VirtualizedList' || cn === 'FlashList' || cn === 'BigList' ||
+          cn === 'RecyclerListView' || cn === 'MasonryFlashList') return true;
+      if (/ScrollView|List/i.test(cn)) return true;
+      var p = fiber.memoizedProps;
+      return !!(p && typeof p === 'object' && (
+        'scrollEventThrottle'            in p || 'extraScrollHeight'              in p ||
+        'showsVerticalScrollIndicator'   in p || 'showsHorizontalScrollIndicator' in p ||
+        'keyboardShouldPersistTaps'      in p || 'keyboardDismissMode'            in p ||
+        'scrollEnabled'                  in p ||
+        typeof p.onScrollBeginDrag === 'function' || typeof p.onScrollEndDrag === 'function'
+      ));
+    }
+
+    var stack = [];
+    for (var ri = 1; ri <= 5; ri++) {
+      var roots = hook.getFiberRoots(ri);
+      if (roots && roots.size > 0) {
+        Array.from(roots).forEach(function(r) { stack.push({ f: r.current, d: 0 }); });
+        break;
+      }
+    }
     while (stack.length) {
       var item = stack.pop(); var fiber = item.f; var depth = item.d;
       if (!fiber || depth > 200) continue;
-      if (!patched.has(fiber)) {
-        patched.add(fiber);
-        var props = fiber.memoizedProps;
-        if (props && !props.__mcpRec) {
-          var tid = props.testID || null;
-          var lbl = props.accessibilityLabel || props['aria-label'] || null;
-          var cn  = typeof fiber.type === 'string'
-            ? fiber.type
-            : (fiber.type && (fiber.type.displayName || fiber.type.name)) || null;
-
-          // ── Tap / press ──────────────────────────────────────────────────────
-          if (typeof props.onPress === 'function') {
-            var op = props.onPress;
-            props.onPress = function(e) {
-              if (globalThis.__METRO_MCP_REC_ACTIVE__)
-                globalThis.__METRO_MCP_REC_EVENTS__.push({ type: 'tap', testID: tid, label: lbl, componentName: cn, route: getRoute(), timestamp: Date.now() });
-              return op.call(this, e);
-            };
-            props.__mcpRec = true;
-          }
-
-          // ── Long press ───────────────────────────────────────────────────────
-          if (typeof props.onLongPress === 'function') {
-            var olp = props.onLongPress;
-            props.onLongPress = function(e) {
-              if (globalThis.__METRO_MCP_REC_ACTIVE__)
-                globalThis.__METRO_MCP_REC_EVENTS__.push({ type: 'long_press', testID: tid, label: lbl, componentName: cn, route: getRoute(), timestamp: Date.now() });
-              return olp.call(this, e);
-            };
-          }
-
-          // ── Text input ───────────────────────────────────────────────────────
-          if (typeof props.onChangeText === 'function') {
-            var oct = props.onChangeText;
-            props.onChangeText = function(val) {
-              if (globalThis.__METRO_MCP_REC_ACTIVE__)
-                globalThis.__METRO_MCP_REC_EVENTS__.push({ type: 'type', testID: tid, label: lbl, text: val, route: getRoute(), timestamp: Date.now() });
-              return oct.call(this, val);
-            };
-          }
-
-          // ── Keyboard submit ──────────────────────────────────────────────────
-          if (typeof props.onSubmitEditing === 'function') {
-            var ose = props.onSubmitEditing;
-            props.onSubmitEditing = function(e) {
-              if (globalThis.__METRO_MCP_REC_ACTIVE__)
-                globalThis.__METRO_MCP_REC_EVENTS__.push({ type: 'submit', testID: tid, label: lbl, route: getRoute(), timestamp: Date.now() });
-              return ose.call(this, e);
-            };
-          }
-
-          // ── Scroll / swipe ───────────────────────────────────────────────────
-          // Target ScrollView-level fibers: covers FlatList → VirtualizedList → ScrollView
-          // and FlashList → RecyclerListView → ScrollView chains, plus named third-party lists.
-          // props.scrollEnabled !== undefined is the most universal scroll-container signal.
-          // Exclude RCT host components (we want the JS composite layer).
-          var isScrollable = cn === 'ScrollView' || cn === 'RecyclerListView' ||
-                             cn === 'FlashList'  || cn === 'MasonryFlashList' ||
-                             cn === 'BigList'    ||
-                             (props.scrollEnabled !== undefined && cn && cn.indexOf('RCT') !== 0);
-          if (isScrollable) {
-            var scrollStart = { x: null, y: null };
-            var origBegin = props.onScrollBeginDrag || null;
-            var origEnd   = props.onScrollEndDrag   || null;
-            props.onScrollBeginDrag = function(e) {
-              scrollStart.x = e.nativeEvent.contentOffset.x;
-              scrollStart.y = e.nativeEvent.contentOffset.y;
-              if (origBegin) origBegin.call(this, e);
-            };
-            props.onScrollEndDrag = function(e) {
-              if (scrollStart.x !== null && globalThis.__METRO_MCP_REC_ACTIVE__) {
-                var dx = e.nativeEvent.contentOffset.x - scrollStart.x;
-                var dy = e.nativeEvent.contentOffset.y - scrollStart.y;
-                // dy > 0: content offset increased → user swiped UP (showed lower content)
-                // dy < 0: content offset decreased → user swiped DOWN
-                var dir = Math.abs(dx) > Math.abs(dy)
-                  ? (dx > 0 ? 'left' : 'right')
-                  : (dy > 0 ? 'up'   : 'down');
-                // 100 ms dedup: prevent duplicate events when multiple scroll fibers are patched
-                var evts = globalThis.__METRO_MCP_REC_EVENTS__;
-                var last = evts[evts.length - 1];
-                if (!(last && last.type === 'swipe' && Date.now() - last.timestamp < 100)) {
-                  evts.push({ type: 'swipe', direction: dir, testID: tid, componentName: cn, route: getRoute(), timestamp: Date.now() });
-                }
-                scrollStart.x = null;
-              }
-              if (origEnd) origEnd.call(this, e);
-            };
-            props.__mcpRec = true;
-          }
+      if (isScrollFiber(fiber) && fiber.memoizedProps && !fiber.memoizedProps.__mcpRec) {
+        // Class components: forceUpdate() is the cleanest approach
+        if (fiber.stateNode && typeof fiber.stateNode.forceUpdate === 'function') {
+          try { fiber.stateNode.forceUpdate(); } catch(e) {}
+        // Function components: use devtools overrideProps to schedule a re-render
+        } else if (renderer && renderer.overrideProps) {
+          try { renderer.overrideProps(fiber, ['__mcpInit'], 1); } catch(e) {}
         }
       }
       if (fiber.sibling) stack.push({ f: fiber.sibling, d: depth });
       if (fiber.child)   stack.push({ f: fiber.child,   d: depth + 1 });
     }
-  }
+  })();
 
-  // Patch currently-rendered fibers
-  for (var i = 1; i <= 5; i++) {
-    var roots = hook.getFiberRoots(i);
-    if (roots && roots.size > 0) {
-      Array.from(roots).forEach(function(r) { patchFibers(r.current); });
-      break;
-    }
-  }
-
-  // Re-patch after every React commit (handles post-navigation new screens)
+  // ── Track navigation events on every React commit ───────────────────────────
   var origCommit = hook.onCommitFiberRoot;
   hook.onCommitFiberRoot = function(id, root) {
     if (globalThis.__METRO_MCP_REC_ACTIVE__) {
-      patchFibers(root.current);
-      // Record navigation events when route changes
       var route = getRoute();
       var evts  = globalThis.__METRO_MCP_REC_EVENTS__;
       var last  = evts[evts.length - 1];
@@ -157,6 +196,8 @@ const START_RECORDING_JS = `
   globalThis.__METRO_MCP_REC_CLEANUP__ = function() {
     globalThis.__METRO_MCP_REC_ACTIVE__ = false;
     hook.onCommitFiberRoot = origCommit;
+    Object.freeze = origFreeze;
+    delete globalThis.__METRO_MCP_REC_CLEANUP__;
   };
   return true;
 })()
@@ -264,9 +305,16 @@ export const testRecorderPlugin = definePlugin({
       handler: async () => {
         storedEvents = null;
 
-        const injected = await ctx.evalInApp(START_RECORDING_JS, { timeout: 6000 }).catch(() => false);
+        let injected: unknown;
+        let injectError = 'script returned false (check __REACT_DEVTOOLS_GLOBAL_HOOK__ availability)';
+        try {
+          injected = await ctx.evalInApp(START_RECORDING_JS, { timeout: 6000 });
+        } catch (err) {
+          injectError = err instanceof Error ? err.message : String(err);
+          injected = false;
+        }
         if (!injected) {
-          return 'Could not inject recording hooks — ensure Metro is connected and the app is running.';
+          return `Could not inject recording hooks — ${injectError}`;
         }
 
         const route = await ctx.evalInApp(CURRENT_ROUTE_JS, { timeout: 3000 }).catch(() => null) as string | null;
