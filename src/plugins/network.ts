@@ -126,20 +126,6 @@ export const networkPlugin = definePlugin({
       currentSession++;
     });
 
-    // When Metro starts rebuilding, try to cache any pending request bodies
-    // before the CDP connection drops during reload.
-    ctx.events.on('bundle_transform_progressed', (event) => {
-      if (event.transformedFileCount === 1 && pendingRequests.size > 0) {
-        const now = Date.now();
-        for (const [, req] of pendingRequests) {
-          req.endTime = now;
-          req.error = 'Bundle reload';
-          buffer.push(req);
-        }
-        pendingRequests.clear();
-      }
-    });
-
     // ── Request tracking tools ─────────────────────────────────────────────────
 
     ctx.registerTool('get_network_requests', {

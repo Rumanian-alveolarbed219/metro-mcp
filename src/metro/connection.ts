@@ -2,6 +2,7 @@ import WebSocket from 'ws';
 import type { CDPConnection } from '../plugin.js';
 import type { CDPRequest, CDPResponse, MetroTarget } from './types.js';
 import { createLogger } from '../utils/logger.js';
+import { wsDataToString } from '../utils/ws.js';
 
 const logger = createLogger('cdp');
 
@@ -77,10 +78,7 @@ export class CDPClient implements CDPConnection {
         });
 
         this.ws.on('message', (data) => {
-          const text = Array.isArray(data) ? Buffer.concat(data).toString()
-            : Buffer.isBuffer(data) ? data.toString()
-            : Buffer.from(data).toString();
-          this.handleMessage(text);
+          this.handleMessage(wsDataToString(data));
         });
 
         this.ws.on('close', (code, reason) => {

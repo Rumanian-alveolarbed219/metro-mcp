@@ -317,12 +317,7 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
       }
 
       await cdpClient.connect(target);
-
-      // Connect to Metro's /events WebSocket for build events (independent of CDP)
-      if (!eventsClient.isConnected()) {
-        eventsClient.connect(server.host, server.port);
-      }
-
+      eventsClient.connect(server.host, server.port);
       return true;
     } catch (err) {
       logger.warn('Could not connect to Metro:', err);

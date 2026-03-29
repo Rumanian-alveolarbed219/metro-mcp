@@ -65,9 +65,14 @@ export interface EvalOptions {
 
 // ── Metro Events ──
 
+export interface MetroEvent {
+  type: string;
+  [key: string]: unknown;
+}
+
 export interface MetroEventsConnection {
-  on(event: string, handler: (event: { type: string; [key: string]: unknown }) => void): void;
-  off(event: string, handler: (event: { type: string; [key: string]: unknown }) => void): void;
+  on(event: string, handler: (event: MetroEvent) => void): void;
+  off(event: string, handler: (event: MetroEvent) => void): void;
   isConnected(): boolean;
 }
 
