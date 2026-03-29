@@ -11,6 +11,7 @@ import type {
   EvalOptions,
 } from './plugin.js';
 import { CDPClient } from './metro/connection.js';
+import { MetroEventsClient } from './metro/events.js';
 import { scanMetroPorts, selectBestTarget, fetchTargets } from './metro/discovery.js';
 import { createLogger } from './utils/logger.js';
 import { createFormatUtils } from './utils/format.js';
@@ -76,6 +77,7 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
   );
 
   const cdpClient = new CDPClient();
+  const eventsClient = new MetroEventsClient();
   const formatUtils = createFormatUtils();
 
   // Server-side reconnect state — single source of truth for all reconnect logic.
@@ -117,6 +119,7 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
     const pluginLogger = createLogger(plugin.name);
     return {
       cdp: cdpClient,
+      events: eventsClient,
       registerTool: <T extends z.ZodType>(name: string, toolConfig: ToolConfig<T>) => {
         try {
           mcpServer.tool(
@@ -314,6 +317,12 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
       }
 
       await cdpClient.connect(target);
+
+      // Connect to Metro's /events WebSocket for build events (independent of CDP)
+      if (!eventsClient.isConnected()) {
+        eventsClient.connect(server.host, server.port);
+      }
+
       return true;
     } catch (err) {
       logger.warn('Could not connect to Metro:', err);

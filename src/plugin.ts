@@ -63,10 +63,20 @@ export interface EvalOptions {
   timeout?: number;
 }
 
+// ── Metro Events ──
+
+export interface MetroEventsConnection {
+  on(event: string, handler: (event: { type: string; [key: string]: unknown }) => void): void;
+  off(event: string, handler: (event: { type: string; [key: string]: unknown }) => void): void;
+  isConnected(): boolean;
+}
+
 // ── Plugin Context ──
 
 export interface PluginContext {
   cdp: CDPConnection;
+  /** Metro `/events` WebSocket — build progress, bundling errors, etc. */
+  events: MetroEventsConnection;
   registerTool<T extends z.ZodType>(name: string, config: ToolConfig<T>): void;
   registerResource(uri: string, config: ResourceConfig): void;
   registerPrompt(name: string, config: PromptConfig): void;

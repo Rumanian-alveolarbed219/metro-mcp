@@ -60,6 +60,23 @@ export const errorsPlugin = definePlugin({
       }
     });
 
+    // Metro /events WebSocket delivers structured build errors directly,
+    // more reliably than pattern-matching console output.
+    ctx.events.on('bundling_error', (event) => {
+      const message = (event.message as string) || 'Unknown bundling error';
+      const fileMatch = message.match(/(?:in |from )([^\s:]+(?:\.tsx?|\.jsx?|\.json))/);
+      const lineMatch = message.match(/(?:line |:)(\d+)/);
+      const colMatch = message.match(/:(\d+):(\d+)/);
+      bundleErrors.push({
+        timestamp: Date.now(),
+        type: 'BundlingError',
+        message,
+        file: fileMatch?.[1],
+        lineNumber: lineMatch ? parseInt(lineMatch[1]) : undefined,
+        column: colMatch ? parseInt(colMatch[2]) : undefined,
+      });
+    });
+
     ctx.cdp.on('Runtime.exceptionThrown', async (params) => {
       const message = extractCDPExceptionMessage(
         params.exceptionDetails as Record<string, unknown>,

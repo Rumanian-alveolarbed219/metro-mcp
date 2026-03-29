@@ -49,6 +49,17 @@ export const consolePlugin = definePlugin({
       });
     });
 
+    // Mark when Metro starts rebuilding — a reload is imminent.
+    ctx.events.on('bundle_transform_progressed', (event) => {
+      if (event.transformedFileCount === 1) {
+        buffer.push({
+          timestamp: Date.now(),
+          level: 'info',
+          message: '── Metro rebuilding ── (file change detected)',
+        });
+      }
+    });
+
     // Insert a visible boundary marker when the CDP connection is re-established,
     // so it's clear where a gap in logs may have occurred.
     ctx.cdp.on('reconnected', () => {
