@@ -28,7 +28,7 @@ export class CDPClient implements CDPConnection {
   private target: MetroTarget | null = null;
 
   private readonly requestTimeout = 10000;
-  private readonly keepAliveInterval = 15000;
+  private readonly keepAliveInterval = 10000;
 
   /**
    * Connect to a CDP target.
@@ -73,9 +73,15 @@ export class CDPClient implements CDPConnection {
           this.handleMessage(event.data as string);
         };
 
-        this.ws.onclose = () => {
+        this.ws.onclose = (event) => {
           // Ignore close events from a replaced socket — a new connection is already in progress
           if (this.ws !== socketForThisConnection) return;
+
+          const closeEvent = event as CloseEvent;
+          const code = closeEvent.code ?? 'unknown';
+          const reason = closeEvent.reason || 'no reason';
+          logger.info(`WebSocket closed (code=${code}, reason="${reason}", wasConnected=${this._isConnected})`);
+
           this._isConnected = false;
           this.stopKeepAlive();
           this.rejectAllPending('WebSocket closed');
@@ -84,8 +90,8 @@ export class CDPClient implements CDPConnection {
           }
         };
 
-        this.ws.onerror = () => {
-          logger.error('WebSocket error');
+        this.ws.onerror = (event) => {
+          logger.error(`WebSocket error (connected=${this._isConnected})`);
           if (!this._isConnected) {
             reject(new Error('Failed to connect to CDP target'));
           }
@@ -166,10 +172,25 @@ export class CDPClient implements CDPConnection {
 
   private startKeepAlive(): void {
     this.stopKeepAlive();
+    let missedKeepAlives = 0;
     this.keepAliveTimer = setInterval(() => {
       if (this._isConnected) {
-        // Re-enable Runtime domain as a lightweight keepalive — idempotent and always supported
-        this.send('Runtime.enable').catch(() => {});
+        // Re-enable Runtime domain as a lightweight keepalive — idempotent and always supported.
+        // Track consecutive failures to detect a silently dead connection.
+        this.send('Runtime.enable')
+          .then(() => {
+            missedKeepAlives = 0;
+          })
+          .catch(() => {
+            missedKeepAlives++;
+            if (missedKeepAlives >= 3) {
+              logger.warn(`${missedKeepAlives} consecutive keepalive failures — closing connection`);
+              // Force-close so the reconnect logic kicks in with a fresh target URL
+              if (this.ws) {
+                try { this.ws.close(); } catch {}
+              }
+            }
+          });
       }
     }, this.keepAliveInterval);
   }

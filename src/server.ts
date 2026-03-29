@@ -79,8 +79,10 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
   const formatUtils = createFormatUtils();
 
   // Server-side reconnect state — single source of truth for all reconnect logic.
-  const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000];
-  const MAX_RECONNECT_ATTEMPTS = 10;
+  // Start with a very short delay (500ms) to recover quickly from brief disconnects
+  // like hot reloads, then ramp up for longer outages.
+  const RECONNECT_DELAYS = [500, 1000, 2000, 4000, 8000, 16000];
+  const MAX_RECONNECT_ATTEMPTS = 15;
   let reconnectAttempts = 0;
   let isReconnecting = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
