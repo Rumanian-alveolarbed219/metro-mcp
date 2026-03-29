@@ -165,6 +165,139 @@ export const networkPlugin = definePlugin({
       },
     });
 
+    // ── Network mocking via CDP Fetch domain ─────────────────────────────────
+
+    interface MockEntry {
+      urlPattern: string;
+      type: 'mock' | 'block';
+      statusCode?: number;
+      responseBody?: string;
+      responseHeaders?: Record<string, string>;
+    }
+
+    const mocks: MockEntry[] = [];
+    let fetchInterceptActive = false;
+
+    function urlMatchesMock(url: string, pattern: string): boolean {
+      // Exact substring or glob (* wildcard)
+      if (pattern.includes('*')) {
+        const regexStr = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+        return new RegExp(regexStr, 'i').test(url);
+      }
+      return url.includes(pattern);
+    }
+
+    async function ensureFetchInterceptEnabled(): Promise<void> {
+      if (fetchInterceptActive) return;
+      // Build Fetch domain patterns from current mocks
+      await ctx.cdp.send('Fetch.enable', {
+        patterns: [{ urlPattern: '*', requestStage: 'Request' }],
+      });
+      fetchInterceptActive = true;
+    }
+
+    async function disableFetchIntercept(): Promise<void> {
+      if (!fetchInterceptActive) return;
+      await ctx.cdp.send('Fetch.disable').catch(() => {});
+      fetchInterceptActive = false;
+    }
+
+    ctx.cdp.on('Fetch.requestPaused', async (params: Record<string, unknown>) => {
+      const requestId = params.requestId as string;
+      const url = (params.request as Record<string, unknown>)?.url as string ?? '';
+
+      const match = mocks.find((m) => urlMatchesMock(url, m.urlPattern));
+      if (!match) {
+        // No mock — pass through
+        ctx.cdp.send('Fetch.continueRequest', { requestId }).catch(() => {});
+        return;
+      }
+
+      if (match.type === 'block') {
+        ctx.cdp.send('Fetch.failRequest', { requestId, errorReason: 'Failed' }).catch(() => {});
+        return;
+      }
+
+      // Fulfill with mock response
+      const headers = Object.entries(match.responseHeaders ?? { 'Content-Type': 'application/json' })
+        .map(([name, value]) => ({ name, value }));
+      const body = match.responseBody ?? '';
+      ctx.cdp.send('Fetch.fulfillRequest', {
+        requestId,
+        responseCode: match.statusCode ?? 200,
+        responseHeaders: headers,
+        body: Buffer.from(body).toString('base64'),
+      }).catch(() => {});
+    });
+
+    ctx.registerTool('mock_network_request', {
+      description:
+        'Intercept network requests matching a URL pattern and return a mock response. ' +
+        'Works for all requests (fetch, XHR) without any app-side changes — uses the CDP Fetch domain. ' +
+        'Useful for testing specific API responses, error states, or slow network conditions.',
+      parameters: z.object({
+        urlPattern: z.string()
+          .describe('URL substring or glob pattern to match (e.g. "/api/users", "*.example.com/auth*")'),
+        statusCode: z.number().int().min(100).max(599).default(200)
+          .describe('HTTP response status code (default 200)'),
+        responseBody: z.string().default('')
+          .describe('Response body string (e.g. JSON payload)'),
+        responseHeaders: z.record(z.string()).optional()
+          .describe('Response headers (default: {"Content-Type": "application/json"})'),
+      }),
+      handler: async ({ urlPattern, statusCode, responseBody, responseHeaders }) => {
+        // Remove any existing mock for this pattern
+        const idx = mocks.findIndex((m) => m.urlPattern === urlPattern);
+        if (idx !== -1) mocks.splice(idx, 1);
+        mocks.push({ urlPattern, type: 'mock', statusCode, responseBody, responseHeaders });
+        await ensureFetchInterceptEnabled();
+        return { mocked: urlPattern, statusCode, activeCount: mocks.length };
+      },
+    });
+
+    ctx.registerTool('block_network_request', {
+      description:
+        'Block all network requests matching a URL pattern, making them fail with a network error. ' +
+        'Useful for testing offline behavior, error handling, or timeout scenarios.',
+      parameters: z.object({
+        urlPattern: z.string()
+          .describe('URL substring or glob pattern to block (e.g. "/api/upload", "analytics.*")'),
+      }),
+      handler: async ({ urlPattern }) => {
+        const idx = mocks.findIndex((m) => m.urlPattern === urlPattern);
+        if (idx !== -1) mocks.splice(idx, 1);
+        mocks.push({ urlPattern, type: 'block' });
+        await ensureFetchInterceptEnabled();
+        return { blocked: urlPattern, activeCount: mocks.length };
+      },
+    });
+
+    ctx.registerTool('clear_network_mocks', {
+      description:
+        'Remove all active network mocks and blocks, restoring normal network behaviour. ' +
+        'Disables the CDP Fetch interceptor so requests pass through without interception.',
+      parameters: z.object({}),
+      handler: async () => {
+        const count = mocks.length;
+        mocks.length = 0;
+        await disableFetchIntercept();
+        return { cleared: count };
+      },
+    });
+
+    ctx.registerTool('get_active_mocks', {
+      description: 'List all currently registered network mocks and blocks.',
+      parameters: z.object({}),
+      handler: async () => {
+        if (mocks.length === 0) return 'No active mocks or blocks.';
+        return mocks.map((m) => ({
+          urlPattern: m.urlPattern,
+          type: m.type,
+          ...(m.type === 'mock' ? { statusCode: m.statusCode, hasBody: !!(m.responseBody) } : {}),
+        }));
+      },
+    });
+
     ctx.registerResource('metro://network', {
       name: 'Network Requests',
       description: 'Recent network requests from the React Native app',

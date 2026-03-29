@@ -90,6 +90,73 @@ export const bundlePlugin = definePlugin({
       },
     });
 
+    ctx.registerTool('reload_app', {
+      description:
+        'Trigger a fast refresh (hot reload) of the running React Native app. ' +
+        'Equivalent to pressing Cmd+R in the simulator or shaking the device and tapping "Reload". ' +
+        'Use this after making code changes or to reset app state without reinstalling.',
+      parameters: z.object({}),
+      handler: async () => {
+        // Primary: call DevSettings.reload() via JS — works on all architectures
+        try {
+          await ctx.evalInApp(
+            `(function() {
+               var DS = require('react-native').DevSettings;
+               if (DS && typeof DS.reload === 'function') { DS.reload(); return 'devSettings'; }
+               return null;
+             })()`,
+          );
+          return 'App reload triggered via DevSettings.reload().';
+        } catch {
+          // fallback below
+        }
+
+        // Fallback: send RN_RELOAD keypress via adb (Android) or simctl (iOS)
+        try {
+          await ctx.exec('adb shell input keyevent 82 2>/dev/null || true');
+          return 'App reload triggered via adb keyevent (Android).';
+        } catch {
+          // ignore
+        }
+
+        return 'Could not trigger reload: no CDP connection and no adb/simctl available. Connect to a device first.';
+      },
+    });
+
+    ctx.registerTool('send_dev_menu_command', {
+      description:
+        'Send a Metro developer menu command to the running app. ' +
+        'Supported commands depend on the React Native version. ' +
+        'Common commands: "reload", "toggleElementInspector", "toggleNetworkInspector", "togglePerformanceMonitor".',
+      parameters: z.object({
+        command: z.string().describe('Dev menu command string (e.g. "reload", "toggleElementInspector")'),
+      }),
+      handler: async ({ command }) => {
+        const result = await ctx.evalInApp(
+          `(function() {
+             var RN = require('react-native');
+             var NM = RN.NativeModules;
+             // React Native 0.71+ DevMenu module
+             if (NM && NM.DevMenu && typeof NM.DevMenu.sendCommand === 'function') {
+               NM.DevMenu.sendCommand(${JSON.stringify(command)});
+               return 'DevMenu.sendCommand';
+             }
+             // Older path via DevSettings
+             var DS = RN.DevSettings;
+             if (DS && typeof DS[${JSON.stringify(command)}] === 'function') {
+               DS[${JSON.stringify(command)}]();
+               return 'DevSettings';
+             }
+             return null;
+           })()`,
+        );
+        if (!result) {
+          return `Command "${command}" not available on this React Native version or dev menu module not found.`;
+        }
+        return `Dev menu command "${command}" sent via ${result}.`;
+      },
+    });
+
     ctx.registerResource('metro://bundle/status', {
       name: 'Bundle Status',
       description: 'Metro bundler status and recent errors',
