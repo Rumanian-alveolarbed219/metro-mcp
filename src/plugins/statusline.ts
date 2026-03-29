@@ -1,4 +1,4 @@
-import { writeFileSync, readFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -8,7 +8,6 @@ export const STATUS_FILE = '/tmp/metro-mcp-status.json';
 
 const CLAUDE_DIR = join(homedir(), '.claude');
 const SCRIPT_PATH = join(CLAUDE_DIR, 'metro-mcp-statusline.sh');
-const SETTINGS_PATH = join(CLAUDE_DIR, 'settings.json');
 
 const SCRIPT_CONTENT = `#!/bin/bash
 # Metro MCP status line for Claude Code
@@ -18,7 +17,7 @@ const SCRIPT_CONTENT = `#!/bin/bash
 STATUS_FILE="/tmp/metro-mcp-status.json"
 
 if [ ! -f "$STATUS_FILE" ]; then
-  echo "Metro: --"
+  printf "\\033[2mMetro ○\\033[0m\\n"
   exit 0
 fi
 
@@ -27,9 +26,9 @@ HOST=$(jq -r '.host' "$STATUS_FILE" 2>/dev/null)
 PORT=$(jq -r '.port' "$STATUS_FILE" 2>/dev/null)
 
 if [ "$CONNECTED" = "true" ]; then
-  printf "\\033[32mMetro ✓ %s:%s\\033[0m\\n" "$HOST" "$PORT"
+  printf "\\033[32mMetro ● %s:%s\\033[0m\\n" "$HOST" "$PORT"
 else
-  printf "\\033[31mMetro ✗\\033[0m\\n"
+  printf "\\033[31mMetro ●\\033[0m\\n"
 fi
 `;
 
@@ -73,50 +72,19 @@ export const statuslinePlugin = definePlugin({
 
     ctx.registerTool('setup_statusline', {
       description:
-        'Set up the Claude Code status bar to show Metro CDP connection status. ' +
-        'Writes a status line script to ~/.claude/metro-mcp-statusline.sh and merges ' +
-        'the statusLine config into ~/.claude/settings.json. Only works with Claude Code.',
+        'Writes the Metro CDP connection status script to ~/.claude/metro-mcp-statusline.sh. ' +
+        'Does not modify settings.json — tell the user to add it to their status line themselves ' +
+        '(e.g. ask Claude: "/statusline add the script at ~/.claude/metro-mcp-statusline.sh"). ' +
+        'Only works with Claude Code.',
       parameters: z.object({}),
       handler: async () => {
         mkdirSync(CLAUDE_DIR, { recursive: true });
-
-        // Write the script
         writeFileSync(SCRIPT_PATH, SCRIPT_CONTENT, { mode: 0o755 });
-
-        // Read existing settings (preserve all other keys)
-        let settings: Record<string, unknown> = {};
-        try {
-          settings = JSON.parse(readFileSync(SETTINGS_PATH, 'utf-8'));
-        } catch {
-          // file missing or invalid JSON — start fresh
-        }
-
-        const existing = settings.statusLine as Record<string, unknown> | undefined;
-
-        if (existing && existing.command !== SCRIPT_PATH) {
-          return [
-            'A statusLine is already configured in ~/.claude/settings.json:',
-            `  ${JSON.stringify(existing)}`,
-            '',
-            'Remove it first if you want metro-mcp to manage it.',
-          ].join('\n');
-        }
-
-        const alreadyConfigured = existing?.command === SCRIPT_PATH;
-
-        settings.statusLine = { type: 'command', command: SCRIPT_PATH };
-        writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2) + '\n');
-
-        if (alreadyConfigured) {
-          return `Status line already configured — script refreshed at ${SCRIPT_PATH}`;
-        }
-
         return [
-          'Claude Code status bar configured.',
-          `  Script:   ${SCRIPT_PATH}`,
-          `  Settings: ${SETTINGS_PATH}`,
+          `Metro MCP status script written to ${SCRIPT_PATH}`,
           '',
-          'Open a new Claude Code session for the status bar to appear.',
+          'To add it to your Claude Code status bar, run:',
+          '  /statusline add the script at ~/.claude/metro-mcp-statusline.sh',
         ].join('\n');
       },
     });
