@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { resolve, dirname } from 'node:path';
 import { definePlugin } from '../plugin.js';
 import { CircularBuffer } from '../utils/buffer.js';
 import { formatTimestamp, formatBytes } from '../utils/format.js';
@@ -166,6 +168,9 @@ export const networkPlugin = definePlugin({
     });
 
     // ── Network mocking via CDP Fetch domain ─────────────────────────────────
+    // Mocks persist in memory until removed/cleared. Interception can be paused
+    // and resumed without losing definitions. Mocks can be saved to / loaded from
+    // a JSON file in the project so they survive MCP server restarts.
 
     interface MockEntry {
       urlPattern: string;
@@ -175,11 +180,16 @@ export const networkPlugin = definePlugin({
       responseHeaders?: Record<string, string>;
     }
 
+    interface MockFile {
+      version: 1;
+      mocks: MockEntry[];
+    }
+
     const mocks: MockEntry[] = [];
     let fetchInterceptActive = false;
+    let mockingPaused = false;  // true = mocks defined but intercept disabled
 
     function urlMatchesMock(url: string, pattern: string): boolean {
-      // Exact substring or glob (* wildcard)
       if (pattern.includes('*')) {
         const regexStr = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
         return new RegExp(regexStr, 'i').test(url);
@@ -187,9 +197,8 @@ export const networkPlugin = definePlugin({
       return url.includes(pattern);
     }
 
-    async function ensureFetchInterceptEnabled(): Promise<void> {
+    async function enableFetchIntercept(): Promise<void> {
       if (fetchInterceptActive) return;
-      // Build Fetch domain patterns from current mocks
       await ctx.cdp.send('Fetch.enable', {
         patterns: [{ urlPattern: '*', requestStage: 'Request' }],
       });
@@ -208,7 +217,6 @@ export const networkPlugin = definePlugin({
 
       const match = mocks.find((m) => urlMatchesMock(url, m.urlPattern));
       if (!match) {
-        // No mock — pass through
         ctx.cdp.send('Fetch.continueRequest', { requestId }).catch(() => {});
         return;
       }
@@ -218,47 +226,45 @@ export const networkPlugin = definePlugin({
         return;
       }
 
-      // Fulfill with mock response
       const headers = Object.entries(match.responseHeaders ?? { 'Content-Type': 'application/json' })
         .map(([name, value]) => ({ name, value }));
-      const body = match.responseBody ?? '';
       ctx.cdp.send('Fetch.fulfillRequest', {
         requestId,
         responseCode: match.statusCode ?? 200,
         responseHeaders: headers,
-        body: Buffer.from(body).toString('base64'),
+        body: Buffer.from(match.responseBody ?? '').toString('base64'),
       }).catch(() => {});
     });
 
     ctx.registerTool('mock_network_request', {
       description:
-        'Intercept network requests matching a URL pattern and return a mock response. ' +
-        'Works for all requests (fetch, XHR) without any app-side changes — uses the CDP Fetch domain. ' +
-        'Useful for testing specific API responses, error states, or slow network conditions.',
+        'Intercept ALL requests matching a URL pattern and return a mock response — every call, not just once. ' +
+        'Uses the CDP Fetch domain: no app changes required, works for fetch and XHR. ' +
+        'Mock stays active until removed with remove_network_mock or cleared with clear_network_mocks. ' +
+        'Use save_network_mocks to persist to a file so mocks survive server restarts.',
       parameters: z.object({
         urlPattern: z.string()
-          .describe('URL substring or glob pattern to match (e.g. "/api/users", "*.example.com/auth*")'),
+          .describe('URL substring or glob pattern (e.g. "/api/users", "*.example.com/auth*")'),
         statusCode: z.number().int().min(100).max(599).default(200)
-          .describe('HTTP response status code (default 200)'),
+          .describe('HTTP status code (default 200)'),
         responseBody: z.string().default('')
-          .describe('Response body string (e.g. JSON payload)'),
+          .describe('Response body string (e.g. a JSON payload)'),
         responseHeaders: z.record(z.string()).optional()
           .describe('Response headers (default: {"Content-Type": "application/json"})'),
       }),
       handler: async ({ urlPattern, statusCode, responseBody, responseHeaders }) => {
-        // Remove any existing mock for this pattern
         const idx = mocks.findIndex((m) => m.urlPattern === urlPattern);
         if (idx !== -1) mocks.splice(idx, 1);
         mocks.push({ urlPattern, type: 'mock', statusCode, responseBody, responseHeaders });
-        await ensureFetchInterceptEnabled();
-        return { mocked: urlPattern, statusCode, activeCount: mocks.length };
+        if (!mockingPaused) await enableFetchIntercept();
+        return { mocked: urlPattern, statusCode, activeCount: mocks.length, interceptActive: fetchInterceptActive };
       },
     });
 
     ctx.registerTool('block_network_request', {
       description:
-        'Block all network requests matching a URL pattern, making them fail with a network error. ' +
-        'Useful for testing offline behavior, error handling, or timeout scenarios.',
+        'Block ALL requests matching a URL pattern, making them fail with a network error — every call. ' +
+        'Useful for testing offline behaviour, error handling, or simulating unavailable services.',
       parameters: z.object({
         urlPattern: z.string()
           .describe('URL substring or glob pattern to block (e.g. "/api/upload", "analytics.*")'),
@@ -267,34 +273,149 @@ export const networkPlugin = definePlugin({
         const idx = mocks.findIndex((m) => m.urlPattern === urlPattern);
         if (idx !== -1) mocks.splice(idx, 1);
         mocks.push({ urlPattern, type: 'block' });
-        await ensureFetchInterceptEnabled();
-        return { blocked: urlPattern, activeCount: mocks.length };
+        if (!mockingPaused) await enableFetchIntercept();
+        return { blocked: urlPattern, activeCount: mocks.length, interceptActive: fetchInterceptActive };
+      },
+    });
+
+    ctx.registerTool('remove_network_mock', {
+      description: 'Remove a single network mock or block by URL pattern, leaving all other mocks intact.',
+      parameters: z.object({
+        urlPattern: z.string().describe('Exact URL pattern to remove'),
+      }),
+      handler: async ({ urlPattern }) => {
+        const idx = mocks.findIndex((m) => m.urlPattern === urlPattern);
+        if (idx === -1) return `No mock found for pattern "${urlPattern}".`;
+        mocks.splice(idx, 1);
+        // If no mocks remain, disable interception
+        if (mocks.length === 0 && !mockingPaused) await disableFetchIntercept();
+        return { removed: urlPattern, remaining: mocks.length };
+      },
+    });
+
+    ctx.registerTool('pause_network_mocking', {
+      description:
+        'Disable network request interception without removing mock definitions. ' +
+        'All mocked URLs will pass through to the real server. ' +
+        'Call resume_network_mocking to re-enable. Useful for quickly toggling between real and mocked responses.',
+      parameters: z.object({}),
+      handler: async () => {
+        if (mockingPaused) return 'Network mocking is already paused.';
+        mockingPaused = true;
+        await disableFetchIntercept();
+        return { paused: true, mocksPreserved: mocks.length };
+      },
+    });
+
+    ctx.registerTool('resume_network_mocking', {
+      description:
+        'Re-enable network request interception after pause_network_mocking. ' +
+        'All previously defined mocks and blocks become active again immediately.',
+      parameters: z.object({}),
+      handler: async () => {
+        if (!mockingPaused && fetchInterceptActive) return 'Network mocking is already active.';
+        mockingPaused = false;
+        if (mocks.length === 0) return 'Network mocking resumed but no mocks are defined. Use mock_network_request to add some.';
+        await enableFetchIntercept();
+        return { resumed: true, activeMocks: mocks.length };
       },
     });
 
     ctx.registerTool('clear_network_mocks', {
       description:
-        'Remove all active network mocks and blocks, restoring normal network behaviour. ' +
-        'Disables the CDP Fetch interceptor so requests pass through without interception.',
+        'Remove ALL network mocks and blocks and disable interception. ' +
+        'Use remove_network_mock to remove a single mock, or pause_network_mocking to temporarily disable without clearing.',
       parameters: z.object({}),
       handler: async () => {
         const count = mocks.length;
         mocks.length = 0;
+        mockingPaused = false;
         await disableFetchIntercept();
         return { cleared: count };
       },
     });
 
+    ctx.registerTool('save_network_mocks', {
+      description:
+        'Save the current mock definitions to a JSON file in your project. ' +
+        'The file can be committed to your codebase and loaded later with load_network_mocks. ' +
+        'Like Chrome DevTools Local Overrides — persist your mock setup across sessions.',
+      parameters: z.object({
+        filepath: z.string().default('./network-mocks.json')
+          .describe('Path to save the mocks file (default: ./network-mocks.json)'),
+      }),
+      handler: async ({ filepath }) => {
+        if (mocks.length === 0) return 'No mocks to save. Add some with mock_network_request first.';
+        const absPath = resolve(filepath);
+        await mkdir(dirname(absPath), { recursive: true });
+        const file: MockFile = { version: 1, mocks: [...mocks] };
+        await writeFile(absPath, JSON.stringify(file, null, 2), 'utf8');
+        return { saved: absPath, count: mocks.length };
+      },
+    });
+
+    ctx.registerTool('load_network_mocks', {
+      description:
+        'Load mock definitions from a previously saved JSON file and activate them immediately. ' +
+        'Use this at the start of a debug session to restore your saved mock configuration. ' +
+        'Existing in-memory mocks are merged (not replaced) unless replace=true.',
+      parameters: z.object({
+        filepath: z.string().default('./network-mocks.json')
+          .describe('Path to the mocks file (default: ./network-mocks.json)'),
+        replace: z.boolean().default(false)
+          .describe('Replace existing in-memory mocks instead of merging (default false)'),
+        activate: z.boolean().default(true)
+          .describe('Start intercepting immediately after loading (default true)'),
+      }),
+      handler: async ({ filepath, replace, activate }) => {
+        const absPath = resolve(filepath);
+        let raw: string;
+        try {
+          raw = await readFile(absPath, 'utf8');
+        } catch {
+          return `File not found: ${absPath}. Use save_network_mocks to create one.`;
+        }
+
+        const file = JSON.parse(raw) as MockFile;
+        if (!Array.isArray(file.mocks)) {
+          return `Invalid mocks file format: expected { version, mocks[] }`;
+        }
+
+        if (replace) mocks.length = 0;
+
+        let added = 0;
+        for (const entry of file.mocks) {
+          const idx = mocks.findIndex((m) => m.urlPattern === entry.urlPattern);
+          if (idx !== -1) mocks.splice(idx, 1);
+          mocks.push(entry);
+          added++;
+        }
+
+        mockingPaused = !activate;
+        if (activate && mocks.length > 0) await enableFetchIntercept();
+
+        return { loaded: absPath, added, total: mocks.length, interceptActive: fetchInterceptActive };
+      },
+    });
+
     ctx.registerTool('get_active_mocks', {
-      description: 'List all currently registered network mocks and blocks.',
+      description: 'List all currently defined network mocks and blocks, and whether interception is active.',
       parameters: z.object({}),
       handler: async () => {
-        if (mocks.length === 0) return 'No active mocks or blocks.';
-        return mocks.map((m) => ({
-          urlPattern: m.urlPattern,
-          type: m.type,
-          ...(m.type === 'mock' ? { statusCode: m.statusCode, hasBody: !!(m.responseBody) } : {}),
-        }));
+        if (mocks.length === 0) return { interceptActive: false, paused: mockingPaused, mocks: [] };
+        return {
+          interceptActive: fetchInterceptActive,
+          paused: mockingPaused,
+          mocks: mocks.map((m) => ({
+            urlPattern: m.urlPattern,
+            type: m.type,
+            ...(m.type === 'mock' ? {
+              statusCode: m.statusCode,
+              responseBodyPreview: m.responseBody ? m.responseBody.slice(0, 100) + (m.responseBody.length > 100 ? '…' : '') : '',
+              responseHeaders: m.responseHeaders,
+            } : {}),
+          })),
+        };
       },
     });
 
