@@ -174,10 +174,19 @@ export const networkPlugin = definePlugin({
 
     interface MockEntry {
       urlPattern: string;
-      type: 'mock' | 'block';
+      // 'mock'             — return a fake response (never hits the real server)
+      // 'block'            — fail the request with a network error
+      // 'request-override' — modify the request then forward to the real server
+      type: 'mock' | 'block' | 'request-override';
+      // type: 'mock' fields
       statusCode?: number;
       responseBody?: string;
       responseHeaders?: Record<string, string>;
+      // type: 'request-override' fields
+      overrideUrl?: string;                        // redirect to a different URL
+      overrideMethod?: string;                     // change HTTP method
+      overrideHeaders?: Record<string, string>;    // merged with original headers
+      overrideBody?: string;                       // replace request body
     }
 
     interface MockFile {
@@ -213,7 +222,8 @@ export const networkPlugin = definePlugin({
 
     ctx.cdp.on('Fetch.requestPaused', async (params: Record<string, unknown>) => {
       const requestId = params.requestId as string;
-      const url = (params.request as Record<string, unknown>)?.url as string ?? '';
+      const request = params.request as Record<string, unknown>;
+      const url = request?.url as string ?? '';
 
       const match = mocks.find((m) => urlMatchesMock(url, m.urlPattern));
       if (!match) {
@@ -226,12 +236,31 @@ export const networkPlugin = definePlugin({
         return;
       }
 
-      const headers = Object.entries(match.responseHeaders ?? { 'Content-Type': 'application/json' })
+      if (match.type === 'request-override') {
+        // Merge override headers on top of the original request headers so existing
+        // headers (cookies, content-type, etc.) are preserved unless explicitly replaced.
+        const originalHeaders = (request?.headers ?? {}) as Record<string, string>;
+        const mergedHeaders = match.overrideHeaders
+          ? { ...originalHeaders, ...match.overrideHeaders }
+          : undefined;
+
+        ctx.cdp.send('Fetch.continueRequest', {
+          requestId,
+          ...(match.overrideUrl     ? { url: match.overrideUrl }                                                   : {}),
+          ...(match.overrideMethod  ? { method: match.overrideMethod }                                             : {}),
+          ...(mergedHeaders         ? { headers: Object.entries(mergedHeaders).map(([name, value]) => ({ name, value })) } : {}),
+          ...(match.overrideBody !== undefined ? { postData: Buffer.from(match.overrideBody).toString('base64') }  : {}),
+        }).catch(() => {});
+        return;
+      }
+
+      // type: 'mock' — return fake response, never reaches real server
+      const responseHeaders = Object.entries(match.responseHeaders ?? { 'Content-Type': 'application/json' })
         .map(([name, value]) => ({ name, value }));
       ctx.cdp.send('Fetch.fulfillRequest', {
         requestId,
         responseCode: match.statusCode ?? 200,
-        responseHeaders: headers,
+        responseHeaders,
         body: Buffer.from(match.responseBody ?? '').toString('base64'),
       }).catch(() => {});
     });
@@ -275,6 +304,40 @@ export const networkPlugin = definePlugin({
         mocks.push({ urlPattern, type: 'block' });
         if (!mockingPaused) await enableFetchIntercept();
         return { blocked: urlPattern, activeCount: mocks.length, interceptActive: fetchInterceptActive };
+      },
+    });
+
+    ctx.registerTool('override_request', {
+      description:
+        'Intercept matching requests, modify them, then forward to the real server — the request side of mocking. ' +
+        'Use this to inject auth headers, redirect to a staging URL, change the HTTP method, or replace the body. ' +
+        'Original request headers are preserved and merged with your overrides (not replaced entirely). ' +
+        'Combine with mock_network_request for full request+response control.',
+      parameters: z.object({
+        urlPattern: z.string()
+          .describe('URL substring or glob pattern to intercept (e.g. "/api/*", "prod.example.com")'),
+        headers: z.record(z.string()).optional()
+          .describe('Headers to add or override (merged with original headers). E.g. {"Authorization": "Bearer test-token"}'),
+        url: z.string().optional()
+          .describe('Redirect matched requests to this URL instead'),
+        method: z.string().optional()
+          .describe('Replace the HTTP method (e.g. "POST" → "GET")'),
+        body: z.string().optional()
+          .describe('Replace the request body (POST data)'),
+      }),
+      handler: async ({ urlPattern, headers, url, method, body }) => {
+        const idx = mocks.findIndex((m) => m.urlPattern === urlPattern);
+        if (idx !== -1) mocks.splice(idx, 1);
+        mocks.push({
+          urlPattern,
+          type: 'request-override',
+          overrideHeaders: headers,
+          overrideUrl: url,
+          overrideMethod: method,
+          overrideBody: body,
+        });
+        if (!mockingPaused) await enableFetchIntercept();
+        return { overriding: urlPattern, changes: { headers: !!headers, url: !!url, method: !!method, body: body !== undefined }, activeCount: mocks.length };
       },
     });
 
@@ -413,6 +476,12 @@ export const networkPlugin = definePlugin({
               statusCode: m.statusCode,
               responseBodyPreview: m.responseBody ? m.responseBody.slice(0, 100) + (m.responseBody.length > 100 ? '…' : '') : '',
               responseHeaders: m.responseHeaders,
+            } : {}),
+            ...(m.type === 'request-override' ? {
+              overrideUrl: m.overrideUrl,
+              overrideMethod: m.overrideMethod,
+              overrideHeaders: m.overrideHeaders,
+              overrideBodyPreview: m.overrideBody ? m.overrideBody.slice(0, 100) + (m.overrideBody.length > 100 ? '…' : '') : undefined,
             } : {}),
           })),
         };
