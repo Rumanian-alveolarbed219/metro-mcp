@@ -387,7 +387,7 @@ const CONSOLE_PROFILE_TITLE = 'metro-mcp';
 
 export const profilerPlugin = definePlugin({
   name: 'profiler',
-  version: '0.1.0',
+
   description: 'CPU profiling via React DevTools hook (primary) or CDP Profiler domain, plus React render tracking',
 
   async setup(ctx) {

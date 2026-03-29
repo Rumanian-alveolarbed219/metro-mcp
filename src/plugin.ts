@@ -96,7 +96,7 @@ export interface Logger {
 
 export interface PluginDefinition {
   name: string;
-  version: string;
+  version?: string;
   description?: string;
   setup(ctx: PluginContext): Promise<void>;
 }

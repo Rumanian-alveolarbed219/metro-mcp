@@ -12,7 +12,7 @@ const CURRENT_ROUTE_JS = `(function() {
 
 export const automationPlugin = definePlugin({
   name: 'automation',
-  version: '0.1.0',
+
   description: 'Wait and polling tools for reliable E2E automation with async state changes',
 
   async setup(ctx) {

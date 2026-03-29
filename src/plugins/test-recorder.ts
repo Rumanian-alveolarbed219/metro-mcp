@@ -292,7 +292,7 @@ let storedEvents: RecordedEvent[] | null = null;
 
 export const testRecorderPlugin = definePlugin({
   name: 'test-recorder',
-  version: '0.1.0',
+
   description: 'Unified mobile test recorder: captures taps, text entry, swipes and navigation via fiber patching; generates Appium, Maestro, and Detox tests',
 
   async setup(ctx) {

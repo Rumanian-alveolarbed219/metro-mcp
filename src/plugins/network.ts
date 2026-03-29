@@ -21,7 +21,7 @@ interface NetworkRequest {
 
 export const networkPlugin = definePlugin({
   name: 'network',
-  version: '0.1.0',
+
   description: 'Network request tracking via CDP Network domain',
 
   async setup(ctx) {
@@ -71,8 +71,6 @@ export const networkPlugin = definePlugin({
       }
     });
 
-    // When the CDP connection drops, flush any in-flight requests to the buffer so they
-    // are visible rather than silently lost.
     ctx.cdp.on('disconnected', () => {
       const now = Date.now();
       for (const [, req] of pendingRequests) {

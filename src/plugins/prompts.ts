@@ -2,7 +2,7 @@ import { definePlugin } from '../plugin.js';
 
 export const promptsPlugin = definePlugin({
   name: 'prompts',
-  version: '0.1.0',
+
   description: 'Guided debugging and testing workflows',
 
   async setup(ctx) {
@@ -17,8 +17,7 @@ export const promptsPlugin = definePlugin({
 3. Get recent console logs, focusing on warnings and errors (get_console_logs with level filter)
 4. Check for any uncaught exceptions (get_errors)
 5. Get network request overview (get_network_requests with summary=true)
-6. Check Metro bundle status (get_bundle_status)
-7. Summarize the app's current state and any issues found`,
+6. Summarize the app's current state and any issues found`,
         },
       ],
     });

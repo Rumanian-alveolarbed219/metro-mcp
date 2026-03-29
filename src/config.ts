@@ -57,14 +57,11 @@ export async function loadConfig(args: string[]): Promise<Required<MetroMCPConfi
   for (const configPath of configPaths) {
     try {
       const fullPath = `${process.cwd()}/${configPath}`;
-      const file = Bun.file(fullPath);
-      if (await file.exists()) {
-        const mod = await import(fullPath);
-        const fileConfig: MetroMCPConfig = mod.default || mod;
-        mergeConfig(config, fileConfig);
-        logger.info(`Loaded config from ${configPath}`);
-        break;
-      }
+      const mod = await import(fullPath);
+      const fileConfig: MetroMCPConfig = mod.default || mod;
+      mergeConfig(config, fileConfig);
+      logger.info(`Loaded config from ${configPath}`);
+      break;
     } catch {
       // Config file not found or invalid, continue
     }
