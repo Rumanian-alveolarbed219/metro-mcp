@@ -121,6 +121,8 @@ export interface MetroMCPConfig {
   };
   network?: {
     interceptFetch?: boolean;
+    /** Path to a .json override file or folder of .json files to auto-load on startup */
+    overridesFile?: string;
   };
   profiler?: {
     /**

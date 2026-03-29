@@ -33,6 +33,9 @@ export async function loadConfig(args: string[]): Promise<Required<MetroMCPConfi
   if (process.env.METRO_HOST) {
     config.metro.host = process.env.METRO_HOST;
   }
+  if (process.env.METRO_NETWORK_OVERRIDES) {
+    config.network.overridesFile = process.env.METRO_NETWORK_OVERRIDES;
+  }
   if (process.env.METRO_PORT) {
     const port = parseInt(process.env.METRO_PORT, 10);
     if (!isNaN(port)) {
@@ -54,6 +57,8 @@ export async function loadConfig(args: string[]): Promise<Required<MetroMCPConfi
       }
     } else if (arg === '--intercept-fetch') {
       config.network.interceptFetch = true;
+    } else if (arg === '--network-overrides' && args[i + 1]) {
+      config.network.overridesFile = args[++i];
     }
   }
 
@@ -95,6 +100,7 @@ function mergeConfig(target: Required<MetroMCPConfig>, source: MetroMCPConfig): 
   }
   if (source.network) {
     if (source.network.interceptFetch !== undefined) target.network.interceptFetch = source.network.interceptFetch;
+    if (source.network.overridesFile !== undefined) target.network.overridesFile = source.network.overridesFile;
   }
   if (source.profiler) {
     if (source.profiler.newArchitecture !== undefined) target.profiler.newArchitecture = source.profiler.newArchitecture;

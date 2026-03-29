@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { resolve, dirname } from 'node:path';
+import { readFile, writeFile, mkdir, readdir, stat } from 'node:fs/promises';
+import { resolve, dirname, join } from 'node:path';
 import { definePlugin } from '../plugin.js';
 import { CircularBuffer } from '../utils/buffer.js';
 import { formatTimestamp, formatBytes } from '../utils/format.js';
@@ -21,14 +21,60 @@ interface NetworkRequest {
   size?: number;
 }
 
+// ── Override types ────────────────────────────────────────────────────────────
+
+// In-memory representation — fully resolved, no file paths
+interface OverrideEntry {
+  name?: string;
+  urlPattern: string;
+  block?: boolean;
+  response?: {
+    statusCode?: number;
+    headers?: Record<string, string>;
+    body?: string;
+  };
+  request?: {
+    url?: string;
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+  };
+}
+
+// File format — response/request can be an inline object or a path string to a .json file
+interface OverrideFileResponseConfig {
+  statusCode?: number;
+  headers?: Record<string, string>;
+  body?: unknown; // string or JSON object/array — serialised to string on load
+}
+interface OverrideFileRequestConfig {
+  url?: string;
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+}
+interface OverrideFileEntry {
+  name?: string;
+  urlPattern: string;
+  block?: boolean;
+  response?: string | OverrideFileResponseConfig;
+  request?: string | OverrideFileRequestConfig;
+}
+interface OverrideFile {
+  version: 1;
+  overrides: OverrideFileEntry[];
+}
+
 export const networkPlugin = definePlugin({
   name: 'network',
   version: '0.1.0',
-  description: 'Network request tracking via CDP Network domain',
+  description: 'Network request tracking and override system via CDP Network/Fetch domains',
 
   async setup(ctx) {
     const buffer = new CircularBuffer<NetworkRequest>(200);
     const pendingRequests = new Map<string, NetworkRequest>();
+
+    // ── CDP Network domain ─────────────────────────────────────────────────────
 
     ctx.cdp.on('Network.requestWillBeSent', (params) => {
       const request: NetworkRequest = {
@@ -82,6 +128,8 @@ export const networkPlugin = definePlugin({
       }
       pendingRequests.clear();
     });
+
+    // ── Request tracking tools ─────────────────────────────────────────────────
 
     ctx.registerTool('get_network_requests', {
       description: 'Get recent network requests from the React Native app.',
@@ -167,38 +215,16 @@ export const networkPlugin = definePlugin({
       },
     });
 
-    // ── Network mocking via CDP Fetch domain ─────────────────────────────────
-    // Mocks persist in memory until removed/cleared. Interception can be paused
-    // and resumed without losing definitions. Mocks can be saved to / loaded from
+    // ── Network overrides via CDP Fetch domain ────────────────────────────────
+    // Overrides persist in memory until removed/cleared. Interception can be paused
+    // and resumed without losing definitions. Overrides can be saved to / loaded from
     // a JSON file in the project so they survive MCP server restarts.
 
-    interface MockEntry {
-      urlPattern: string;
-      // 'mock'             — return a fake response (never hits the real server)
-      // 'block'            — fail the request with a network error
-      // 'request-override' — modify the request then forward to the real server
-      type: 'mock' | 'block' | 'request-override';
-      // type: 'mock' fields
-      statusCode?: number;
-      responseBody?: string;
-      responseHeaders?: Record<string, string>;
-      // type: 'request-override' fields
-      overrideUrl?: string;                        // redirect to a different URL
-      overrideMethod?: string;                     // change HTTP method
-      overrideHeaders?: Record<string, string>;    // merged with original headers
-      overrideBody?: string;                       // replace request body
-    }
-
-    interface MockFile {
-      version: 1;
-      mocks: MockEntry[];
-    }
-
-    const mocks: MockEntry[] = [];
+    const overrides: OverrideEntry[] = [];
     let fetchInterceptActive = false;
-    let mockingPaused = false;  // true = mocks defined but intercept disabled
+    let overridesPaused = false;
 
-    function urlMatchesMock(url: string, pattern: string): boolean {
+    function urlMatchesPattern(url: string, pattern: string): boolean {
       if (pattern.includes('*')) {
         const regexStr = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
         return new RegExp(regexStr, 'i').test(url);
@@ -220,99 +246,210 @@ export const networkPlugin = definePlugin({
       fetchInterceptActive = false;
     }
 
+    // Resolve a response/request value from a file-format entry.
+    // If it's a string, treat it as a path to a JSON file and read it.
+    // `baseDir` is the directory of the override file being loaded.
+    async function resolveFileRef<T>(
+      value: string | T,
+      baseDir: string,
+    ): Promise<T> {
+      if (typeof value === 'string') {
+        const absPath = resolve(baseDir, value);
+        const raw = await readFile(absPath, 'utf8');
+        return JSON.parse(raw) as T;
+      }
+      return value;
+    }
+
+    // Convert a OverrideFileEntry (from disk) to an in-memory OverrideEntry.
+    async function resolveFileEntry(
+      entry: OverrideFileEntry,
+      baseDir: string,
+    ): Promise<OverrideEntry> {
+      const resolved: OverrideEntry = {
+        name: entry.name,
+        urlPattern: entry.urlPattern,
+        block: entry.block,
+      };
+
+      if (entry.response !== undefined) {
+        const cfg = await resolveFileRef<OverrideFileResponseConfig>(entry.response, baseDir);
+        resolved.response = {
+          statusCode: cfg.statusCode,
+          headers: cfg.headers,
+          // body can be inline object/array or string — always serialise to string
+          body: cfg.body !== undefined
+            ? (typeof cfg.body === 'string' ? cfg.body : JSON.stringify(cfg.body))
+            : undefined,
+        };
+      }
+
+      if (entry.request !== undefined) {
+        resolved.request = await resolveFileRef<OverrideFileRequestConfig>(entry.request, baseDir);
+      }
+
+      return resolved;
+    }
+
+    // Load entries from a single .json file. Returns resolved OverrideEntry[].
+    async function loadFromFile(filePath: string): Promise<OverrideEntry[]> {
+      const absPath = resolve(filePath);
+      const raw = await readFile(absPath, 'utf8');
+      const baseDir = dirname(absPath);
+      const parsed = JSON.parse(raw);
+
+      // File can be:
+      //   { version: 1, overrides: [...] }  — standard override file
+      //   [{ urlPattern, ... }, ...]         — bare array of entries
+      //   { urlPattern, ... }                — single entry object
+      let fileEntries: OverrideFileEntry[];
+      if (Array.isArray(parsed)) {
+        fileEntries = parsed as OverrideFileEntry[];
+      } else if (parsed.overrides && Array.isArray(parsed.overrides)) {
+        fileEntries = parsed.overrides as OverrideFileEntry[];
+      } else if (parsed.urlPattern) {
+        fileEntries = [parsed as OverrideFileEntry];
+      } else {
+        throw new Error(`Unrecognised format in ${absPath}. Expected { overrides: [...] }, an array, or a single override object.`);
+      }
+
+      return Promise.all(fileEntries.map((e) => resolveFileEntry(e, baseDir)));
+    }
+
+    // Load entries from a directory — reads all *.json files.
+    async function loadFromFolder(folderPath: string): Promise<OverrideEntry[]> {
+      const absPath = resolve(folderPath);
+      const files = await readdir(absPath);
+      const jsonFiles = files.filter((f) => f.endsWith('.json'));
+      const results: OverrideEntry[] = [];
+      for (const file of jsonFiles) {
+        const entries = await loadFromFile(join(absPath, file));
+        results.push(...entries);
+      }
+      return results;
+    }
+
+    // Shared logic for loading overrides (used by tool + auto-load).
+    async function loadOverridesFromPath(
+      filePath: string,
+      nameFilter: string | undefined,
+      replace: boolean,
+      activate: boolean,
+    ): Promise<{ loaded: string; added: number; total: number }> {
+      const absPath = resolve(filePath);
+      const pathStat = await stat(absPath);
+      const entries = pathStat.isDirectory()
+        ? await loadFromFolder(absPath)
+        : await loadFromFile(absPath);
+
+      const filtered = nameFilter
+        ? entries.filter((e) => e.name === nameFilter)
+        : entries;
+
+      if (replace) overrides.length = 0;
+
+      let added = 0;
+      for (const entry of filtered) {
+        const idx = overrides.findIndex((o) => o.urlPattern === entry.urlPattern);
+        if (idx !== -1) overrides.splice(idx, 1);
+        overrides.push(entry);
+        added++;
+      }
+
+      overridesPaused = !activate;
+      if (activate && overrides.length > 0) await enableFetchIntercept();
+
+      return { loaded: absPath, added, total: overrides.length };
+    }
+
+    // ── CDP Fetch domain handler ───────────────────────────────────────────────
+
     ctx.cdp.on('Fetch.requestPaused', async (params: Record<string, unknown>) => {
       const requestId = params.requestId as string;
       const request = params.request as Record<string, unknown>;
       const url = request?.url as string ?? '';
 
-      const match = mocks.find((m) => urlMatchesMock(url, m.urlPattern));
+      const match = overrides.find((o) => urlMatchesPattern(url, o.urlPattern));
       if (!match) {
         ctx.cdp.send('Fetch.continueRequest', { requestId }).catch(() => {});
         return;
       }
 
-      if (match.type === 'block') {
+      // block takes priority
+      if (match.block) {
         ctx.cdp.send('Fetch.failRequest', { requestId, errorReason: 'Failed' }).catch(() => {});
         return;
       }
 
-      if (match.type === 'request-override') {
-        // Merge override headers on top of the original request headers so existing
-        // headers (cookies, content-type, etc.) are preserved unless explicitly replaced.
-        const originalHeaders = (request?.headers ?? {}) as Record<string, string>;
-        const mergedHeaders = match.overrideHeaders
-          ? { ...originalHeaders, ...match.overrideHeaders }
-          : undefined;
-
-        ctx.cdp.send('Fetch.continueRequest', {
+      // response override — return fake response, real server never reached
+      if (match.response) {
+        const headers = Object.entries(match.response.headers ?? { 'Content-Type': 'application/json' })
+          .map(([name, value]) => ({ name, value }));
+        ctx.cdp.send('Fetch.fulfillRequest', {
           requestId,
-          ...(match.overrideUrl     ? { url: match.overrideUrl }                                                   : {}),
-          ...(match.overrideMethod  ? { method: match.overrideMethod }                                             : {}),
-          ...(mergedHeaders         ? { headers: Object.entries(mergedHeaders).map(([name, value]) => ({ name, value })) } : {}),
-          ...(match.overrideBody !== undefined ? { postData: Buffer.from(match.overrideBody).toString('base64') }  : {}),
+          responseCode: match.response.statusCode ?? 200,
+          responseHeaders: headers,
+          body: Buffer.from(match.response.body ?? '').toString('base64'),
         }).catch(() => {});
         return;
       }
 
-      // type: 'mock' — return fake response, never reaches real server
-      const responseHeaders = Object.entries(match.responseHeaders ?? { 'Content-Type': 'application/json' })
-        .map(([name, value]) => ({ name, value }));
-      ctx.cdp.send('Fetch.fulfillRequest', {
-        requestId,
-        responseCode: match.statusCode ?? 200,
-        responseHeaders,
-        body: Buffer.from(match.responseBody ?? '').toString('base64'),
-      }).catch(() => {});
+      // request override — modify request then forward to real server
+      if (match.request) {
+        // Merge override headers on top of original headers so cookies etc. are preserved
+        const originalHeaders = (request?.headers ?? {}) as Record<string, string>;
+        const mergedHeaders = match.request.headers
+          ? { ...originalHeaders, ...match.request.headers }
+          : undefined;
+
+        ctx.cdp.send('Fetch.continueRequest', {
+          requestId,
+          ...(match.request.url     ? { url: match.request.url }                                                                    : {}),
+          ...(match.request.method  ? { method: match.request.method }                                                              : {}),
+          ...(mergedHeaders         ? { headers: Object.entries(mergedHeaders).map(([name, value]) => ({ name, value })) }          : {}),
+          ...(match.request.body !== undefined ? { postData: Buffer.from(match.request.body).toString('base64') }                   : {}),
+        }).catch(() => {});
+        return;
+      }
+
+      // No actionable fields — pass through
+      ctx.cdp.send('Fetch.continueRequest', { requestId }).catch(() => {});
     });
 
-    ctx.registerTool('mock_network_request', {
+    // ── Override tools ─────────────────────────────────────────────────────────
+
+    ctx.registerTool('override_network_response', {
       description:
-        'Intercept ALL requests matching a URL pattern and return a mock response — every call, not just once. ' +
+        'Intercept ALL requests matching a URL pattern and return a fake response — every call, not just once. ' +
         'Uses the CDP Fetch domain: no app changes required, works for fetch and XHR. ' +
-        'Mock stays active until removed with remove_network_mock or cleared with clear_network_mocks. ' +
-        'Use save_network_mocks to persist to a file so mocks survive server restarts.',
+        'Override stays active until removed with remove_network_override or cleared with clear_network_overrides. ' +
+        'Use save_network_overrides to persist to a file so overrides survive server restarts.',
       parameters: z.object({
         urlPattern: z.string()
           .describe('URL substring or glob pattern (e.g. "/api/users", "*.example.com/auth*")'),
         statusCode: z.number().int().min(100).max(599).default(200)
           .describe('HTTP status code (default 200)'),
-        responseBody: z.string().default('')
+        body: z.string().default('')
           .describe('Response body string (e.g. a JSON payload)'),
-        responseHeaders: z.record(z.string()).optional()
+        headers: z.record(z.string()).optional()
           .describe('Response headers (default: {"Content-Type": "application/json"})'),
+        name: z.string().optional()
+          .describe('Human-readable name for this override (used for single-item loading)'),
       }),
-      handler: async ({ urlPattern, statusCode, responseBody, responseHeaders }) => {
-        const idx = mocks.findIndex((m) => m.urlPattern === urlPattern);
-        if (idx !== -1) mocks.splice(idx, 1);
-        mocks.push({ urlPattern, type: 'mock', statusCode, responseBody, responseHeaders });
-        if (!mockingPaused) await enableFetchIntercept();
-        return { mocked: urlPattern, statusCode, activeCount: mocks.length, interceptActive: fetchInterceptActive };
+      handler: async ({ urlPattern, statusCode, body, headers, name }) => {
+        const idx = overrides.findIndex((o) => o.urlPattern === urlPattern);
+        if (idx !== -1) overrides.splice(idx, 1);
+        overrides.push({ name, urlPattern, response: { statusCode, body, headers } });
+        if (!overridesPaused) await enableFetchIntercept();
+        return { overriding: urlPattern, type: 'response', statusCode, activeCount: overrides.length, interceptActive: fetchInterceptActive };
       },
     });
 
-    ctx.registerTool('block_network_request', {
+    ctx.registerTool('override_network_request', {
       description:
-        'Block ALL requests matching a URL pattern, making them fail with a network error — every call. ' +
-        'Useful for testing offline behaviour, error handling, or simulating unavailable services.',
-      parameters: z.object({
-        urlPattern: z.string()
-          .describe('URL substring or glob pattern to block (e.g. "/api/upload", "analytics.*")'),
-      }),
-      handler: async ({ urlPattern }) => {
-        const idx = mocks.findIndex((m) => m.urlPattern === urlPattern);
-        if (idx !== -1) mocks.splice(idx, 1);
-        mocks.push({ urlPattern, type: 'block' });
-        if (!mockingPaused) await enableFetchIntercept();
-        return { blocked: urlPattern, activeCount: mocks.length, interceptActive: fetchInterceptActive };
-      },
-    });
-
-    ctx.registerTool('override_request', {
-      description:
-        'Intercept matching requests, modify them, then forward to the real server — the request side of mocking. ' +
+        'Intercept matching requests, modify them, then forward to the real server. ' +
         'Use this to inject auth headers, redirect to a staging URL, change the HTTP method, or replace the body. ' +
-        'Original request headers are preserved and merged with your overrides (not replaced entirely). ' +
-        'Combine with mock_network_request for full request+response control.',
+        'Original request headers are preserved and merged with your overrides (not replaced entirely).',
       parameters: z.object({
         urlPattern: z.string()
           .describe('URL substring or glob pattern to intercept (e.g. "/api/*", "prod.example.com")'),
@@ -324,169 +461,192 @@ export const networkPlugin = definePlugin({
           .describe('Replace the HTTP method (e.g. "POST" → "GET")'),
         body: z.string().optional()
           .describe('Replace the request body (POST data)'),
+        name: z.string().optional()
+          .describe('Human-readable name for this override'),
       }),
-      handler: async ({ urlPattern, headers, url, method, body }) => {
-        const idx = mocks.findIndex((m) => m.urlPattern === urlPattern);
-        if (idx !== -1) mocks.splice(idx, 1);
-        mocks.push({
-          urlPattern,
-          type: 'request-override',
-          overrideHeaders: headers,
-          overrideUrl: url,
-          overrideMethod: method,
-          overrideBody: body,
-        });
-        if (!mockingPaused) await enableFetchIntercept();
-        return { overriding: urlPattern, changes: { headers: !!headers, url: !!url, method: !!method, body: body !== undefined }, activeCount: mocks.length };
+      handler: async ({ urlPattern, headers, url, method, body, name }) => {
+        const idx = overrides.findIndex((o) => o.urlPattern === urlPattern);
+        if (idx !== -1) overrides.splice(idx, 1);
+        overrides.push({ name, urlPattern, request: { headers, url, method, body } });
+        if (!overridesPaused) await enableFetchIntercept();
+        return { overriding: urlPattern, type: 'request', changes: { headers: !!headers, url: !!url, method: !!method, body: body !== undefined }, activeCount: overrides.length };
       },
     });
 
-    ctx.registerTool('remove_network_mock', {
-      description: 'Remove a single network mock or block by URL pattern, leaving all other mocks intact.',
+    ctx.registerTool('block_network_request', {
+      description:
+        'Block ALL requests matching a URL pattern, making them fail with a network error — every call. ' +
+        'Useful for testing offline behaviour, error handling, or simulating unavailable services.',
       parameters: z.object({
-        urlPattern: z.string().describe('Exact URL pattern to remove'),
+        urlPattern: z.string()
+          .describe('URL substring or glob pattern to block (e.g. "/api/upload", "analytics.*")'),
+        name: z.string().optional()
+          .describe('Human-readable name for this override'),
+      }),
+      handler: async ({ urlPattern, name }) => {
+        const idx = overrides.findIndex((o) => o.urlPattern === urlPattern);
+        if (idx !== -1) overrides.splice(idx, 1);
+        overrides.push({ name, urlPattern, block: true });
+        if (!overridesPaused) await enableFetchIntercept();
+        return { blocked: urlPattern, activeCount: overrides.length, interceptActive: fetchInterceptActive };
+      },
+    });
+
+    ctx.registerTool('remove_network_override', {
+      description: 'Remove a single network override by URL pattern, leaving all other overrides intact.',
+      parameters: z.object({
+        urlPattern: z.string().describe('Exact URL pattern of the override to remove'),
       }),
       handler: async ({ urlPattern }) => {
-        const idx = mocks.findIndex((m) => m.urlPattern === urlPattern);
-        if (idx === -1) return `No mock found for pattern "${urlPattern}".`;
-        mocks.splice(idx, 1);
-        // If no mocks remain, disable interception
-        if (mocks.length === 0 && !mockingPaused) await disableFetchIntercept();
-        return { removed: urlPattern, remaining: mocks.length };
+        const idx = overrides.findIndex((o) => o.urlPattern === urlPattern);
+        if (idx === -1) return `No override found for pattern "${urlPattern}". Call get_network_overrides to see active overrides.`;
+        overrides.splice(idx, 1);
+        if (overrides.length === 0 && !overridesPaused) await disableFetchIntercept();
+        return { removed: urlPattern, remaining: overrides.length };
       },
     });
 
-    ctx.registerTool('pause_network_mocking', {
+    ctx.registerTool('pause_network_overrides', {
       description:
-        'Disable network request interception without removing mock definitions. ' +
-        'All mocked URLs will pass through to the real server. ' +
-        'Call resume_network_mocking to re-enable. Useful for quickly toggling between real and mocked responses.',
+        'Disable network request interception without removing override definitions. ' +
+        'All requests will pass through to the real server. ' +
+        'Call resume_network_overrides to re-enable. Useful for quickly comparing real vs overridden responses.',
       parameters: z.object({}),
       handler: async () => {
-        if (mockingPaused) return 'Network mocking is already paused.';
-        mockingPaused = true;
+        if (overridesPaused) return 'Network overrides are already paused.';
+        overridesPaused = true;
         await disableFetchIntercept();
-        return { paused: true, mocksPreserved: mocks.length };
+        return { paused: true, overridesPreserved: overrides.length };
       },
     });
 
-    ctx.registerTool('resume_network_mocking', {
+    ctx.registerTool('resume_network_overrides', {
       description:
-        'Re-enable network request interception after pause_network_mocking. ' +
-        'All previously defined mocks and blocks become active again immediately.',
+        'Re-enable network request interception after pause_network_overrides. ' +
+        'All previously defined overrides become active again immediately.',
       parameters: z.object({}),
       handler: async () => {
-        if (!mockingPaused && fetchInterceptActive) return 'Network mocking is already active.';
-        mockingPaused = false;
-        if (mocks.length === 0) return 'Network mocking resumed but no mocks are defined. Use mock_network_request to add some.';
+        if (!overridesPaused && fetchInterceptActive) return 'Network overrides are already active.';
+        overridesPaused = false;
+        if (overrides.length === 0) return 'Network overrides resumed but no overrides are defined. Use override_network_response or load_network_overrides to add some.';
         await enableFetchIntercept();
-        return { resumed: true, activeMocks: mocks.length };
+        return { resumed: true, activeOverrides: overrides.length };
       },
     });
 
-    ctx.registerTool('clear_network_mocks', {
+    ctx.registerTool('clear_network_overrides', {
       description:
-        'Remove ALL network mocks and blocks and disable interception. ' +
-        'Use remove_network_mock to remove a single mock, or pause_network_mocking to temporarily disable without clearing.',
+        'Remove ALL network overrides and disable interception. ' +
+        'Use remove_network_override to remove a single override, or pause_network_overrides to temporarily disable without clearing.',
       parameters: z.object({}),
       handler: async () => {
-        const count = mocks.length;
-        mocks.length = 0;
-        mockingPaused = false;
+        const count = overrides.length;
+        overrides.length = 0;
+        overridesPaused = false;
         await disableFetchIntercept();
         return { cleared: count };
       },
     });
 
-    ctx.registerTool('save_network_mocks', {
-      description:
-        'Save the current mock definitions to a JSON file in your project. ' +
-        'The file can be committed to your codebase and loaded later with load_network_mocks. ' +
-        'Like Chrome DevTools Local Overrides — persist your mock setup across sessions.',
-      parameters: z.object({
-        filepath: z.string().default('./network-mocks.json')
-          .describe('Path to save the mocks file (default: ./network-mocks.json)'),
-      }),
-      handler: async ({ filepath }) => {
-        if (mocks.length === 0) return 'No mocks to save. Add some with mock_network_request first.';
-        const absPath = resolve(filepath);
-        await mkdir(dirname(absPath), { recursive: true });
-        const file: MockFile = { version: 1, mocks: [...mocks] };
-        await writeFile(absPath, JSON.stringify(file, null, 2), 'utf8');
-        return { saved: absPath, count: mocks.length };
-      },
-    });
-
-    ctx.registerTool('load_network_mocks', {
-      description:
-        'Load mock definitions from a previously saved JSON file and activate them immediately. ' +
-        'Use this at the start of a debug session to restore your saved mock configuration. ' +
-        'Existing in-memory mocks are merged (not replaced) unless replace=true.',
-      parameters: z.object({
-        filepath: z.string().default('./network-mocks.json')
-          .describe('Path to the mocks file (default: ./network-mocks.json)'),
-        replace: z.boolean().default(false)
-          .describe('Replace existing in-memory mocks instead of merging (default false)'),
-        activate: z.boolean().default(true)
-          .describe('Start intercepting immediately after loading (default true)'),
-      }),
-      handler: async ({ filepath, replace, activate }) => {
-        const absPath = resolve(filepath);
-        let raw: string;
-        try {
-          raw = await readFile(absPath, 'utf8');
-        } catch {
-          return `File not found: ${absPath}. Use save_network_mocks to create one.`;
-        }
-
-        const file = JSON.parse(raw) as MockFile;
-        if (!Array.isArray(file.mocks)) {
-          return `Invalid mocks file format: expected { version, mocks[] }`;
-        }
-
-        if (replace) mocks.length = 0;
-
-        let added = 0;
-        for (const entry of file.mocks) {
-          const idx = mocks.findIndex((m) => m.urlPattern === entry.urlPattern);
-          if (idx !== -1) mocks.splice(idx, 1);
-          mocks.push(entry);
-          added++;
-        }
-
-        mockingPaused = !activate;
-        if (activate && mocks.length > 0) await enableFetchIntercept();
-
-        return { loaded: absPath, added, total: mocks.length, interceptActive: fetchInterceptActive };
-      },
-    });
-
-    ctx.registerTool('get_active_mocks', {
-      description: 'List all currently defined network mocks and blocks, and whether interception is active.',
+    ctx.registerTool('get_network_overrides', {
+      description: 'List all currently defined network overrides and whether interception is active.',
       parameters: z.object({}),
       handler: async () => {
-        if (mocks.length === 0) return { interceptActive: false, paused: mockingPaused, mocks: [] };
+        if (overrides.length === 0) return { interceptActive: false, paused: overridesPaused, overrides: [] };
         return {
           interceptActive: fetchInterceptActive,
-          paused: mockingPaused,
-          mocks: mocks.map((m) => ({
-            urlPattern: m.urlPattern,
-            type: m.type,
-            ...(m.type === 'mock' ? {
-              statusCode: m.statusCode,
-              responseBodyPreview: m.responseBody ? m.responseBody.slice(0, 100) + (m.responseBody.length > 100 ? '…' : '') : '',
-              responseHeaders: m.responseHeaders,
+          paused: overridesPaused,
+          overrides: overrides.map((o) => ({
+            name: o.name,
+            urlPattern: o.urlPattern,
+            type: o.block ? 'block' : o.response ? 'response' : 'request',
+            ...(o.response ? {
+              statusCode: o.response.statusCode,
+              bodyPreview: o.response.body
+                ? o.response.body.slice(0, 120) + (o.response.body.length > 120 ? '…' : '')
+                : '',
+              headers: o.response.headers,
             } : {}),
-            ...(m.type === 'request-override' ? {
-              overrideUrl: m.overrideUrl,
-              overrideMethod: m.overrideMethod,
-              overrideHeaders: m.overrideHeaders,
-              overrideBodyPreview: m.overrideBody ? m.overrideBody.slice(0, 100) + (m.overrideBody.length > 100 ? '…' : '') : undefined,
+            ...(o.request ? {
+              requestUrl: o.request.url,
+              requestMethod: o.request.method,
+              requestHeaders: o.request.headers,
+              requestBodyPreview: o.request.body
+                ? o.request.body.slice(0, 120) + (o.request.body.length > 120 ? '…' : '')
+                : undefined,
             } : {}),
           })),
         };
       },
     });
+
+    ctx.registerTool('save_network_overrides', {
+      description:
+        'Save the current in-memory overrides to a JSON file so they can be committed to your codebase. ' +
+        'Load them back with load_network_overrides. Defaults to ./network-overrides.json.',
+      parameters: z.object({
+        filepath: z.string().default('./network-overrides.json')
+          .describe('Destination path (default: ./network-overrides.json)'),
+      }),
+      handler: async ({ filepath }) => {
+        if (overrides.length === 0) return 'No overrides to save. Add some with override_network_response first.';
+        const absPath = resolve(filepath);
+        await mkdir(dirname(absPath), { recursive: true });
+
+        // Serialise to file format (response body stored as string inline)
+        const fileEntries: OverrideFileEntry[] = overrides.map((o) => ({
+          name: o.name,
+          urlPattern: o.urlPattern,
+          block: o.block,
+          response: o.response ? {
+            statusCode: o.response.statusCode,
+            headers: o.response.headers,
+            body: o.response.body !== undefined
+              ? (() => { try { return JSON.parse(o.response!.body!); } catch { return o.response!.body; } })()
+              : undefined,
+          } : undefined,
+          request: o.request,
+        }));
+
+        const file: OverrideFile = { version: 1, overrides: fileEntries };
+        await writeFile(absPath, JSON.stringify(file, null, 2), 'utf8');
+        return { saved: absPath, count: overrides.length };
+      },
+    });
+
+    ctx.registerTool('load_network_overrides', {
+      description:
+        'Load overrides from a JSON file or folder and activate them. ' +
+        'Each file can be a single override object, an array of overrides, or { version, overrides: [...] }. ' +
+        'The response and request fields can be inline config objects or file path strings pointing to separate .json files. ' +
+        'Omit filepath to use the path configured via METRO_NETWORK_OVERRIDES or network.overridesFile.',
+      parameters: z.object({
+        filepath: z.string().optional()
+          .describe('Path to a .json file or folder of .json files. Omit to use the configured overridesFile.'),
+        name: z.string().optional()
+          .describe('Load only the override with this exact name. Omit to load all.'),
+        replace: z.boolean().default(false)
+          .describe('Replace all in-memory overrides instead of merging (default false)'),
+        activate: z.boolean().default(true)
+          .describe('Start intercepting immediately after loading (default true)'),
+      }),
+      handler: async ({ filepath, name, replace, activate }) => {
+        const networkConfig = (ctx.config as Record<string, unknown>).network as { overridesFile?: string } | undefined;
+        const targetPath = filepath ?? networkConfig?.overridesFile;
+        if (!targetPath) {
+          return 'No filepath provided and no overridesFile configured. Pass filepath or set network.overridesFile in metro-mcp.config.ts or METRO_NETWORK_OVERRIDES env var.';
+        }
+
+        try {
+          const result = await loadOverridesFromPath(targetPath, name, replace, activate);
+          return result;
+        } catch (err) {
+          return `Failed to load overrides from "${targetPath}": ${err instanceof Error ? err.message : String(err)}`;
+        }
+      },
+    });
+
+    // ── Resource ───────────────────────────────────────────────────────────────
 
     ctx.registerResource('metro://network', {
       name: 'Network Requests',
@@ -505,5 +665,17 @@ export const networkPlugin = definePlugin({
         );
       },
     });
+
+    // ── Auto-load overrides on startup if configured ───────────────────────────
+
+    const networkConfig = (ctx.config as Record<string, unknown>).network as { overridesFile?: string } | undefined;
+    if (networkConfig?.overridesFile) {
+      try {
+        const result = await loadOverridesFromPath(networkConfig.overridesFile, undefined, false, true);
+        ctx.logger.info(`Auto-loaded ${result.added} network override(s) from ${result.loaded}`);
+      } catch (err) {
+        ctx.logger.warn(`Failed to auto-load network overrides from "${networkConfig.overridesFile}": ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
   },
 });
