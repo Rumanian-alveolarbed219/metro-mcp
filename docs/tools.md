@@ -1,5 +1,7 @@
 # Tools Reference
 
+Jump to: [Console](#console) · [Network](#network) · [Errors](#errors) · [Evaluate](#evaluate) · [Device](#device) · [Redux](#redux) · [Components](#components) · [Storage](#storage) · [Bundle](#bundle) · [Simulator](#simulator) · [Deep Link](#deep-link) · [UI Interact](#ui-interact) · [Navigation](#navigation) · [Accessibility](#accessibility) · [Profiler](#profiler) · [Test Recorder](#test-recorder) · [Commands](#commands) · [Resources](#resources) · [Prompts](#prompts)
+
 ## Console
 
 - **`get_console_logs`** — Get recent console output. Filter by `level` (log/warn/error/info/debug), `search` text, `limit`. Supports `summary` and `compact` modes.
