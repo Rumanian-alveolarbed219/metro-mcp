@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { definePlugin } from '../plugin.js';
-import { CircularBuffer } from '../utils/buffer.js';
+import { DeviceBufferManager } from '../utils/buffer.js';
 import { formatTimestamp, formatBytes } from '../utils/format.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -39,7 +39,7 @@ export const networkPlugin = definePlugin({
   description: 'Network request tracking via CDP Network domain',
 
   async setup(ctx) {
-    const buffer = new CircularBuffer<NetworkRequest>(200);
+    const buffers = new DeviceBufferManager<NetworkRequest>(200);
     const pendingRequests = new Map<string, NetworkRequest>();
 
     /** Monotonically increasing session counter – bumped on every reconnect so we
@@ -48,6 +48,11 @@ export const networkPlugin = definePlugin({
 
     /** Simple concurrency limiter for eager body fetches to avoid flooding CDP. */
     let activeFetches = 0;
+
+    function getDeviceBuffer(): ReturnType<DeviceBufferManager<NetworkRequest>['getOrCreate']> | null {
+      const key = ctx.getActiveDeviceKey();
+      return key ? buffers.getOrCreate(key) : null;
+    }
 
     function fetchAndCacheBody(req: NetworkRequest): void {
       if (activeFetches >= MAX_CONCURRENT_BODY_FETCHES) return;
@@ -97,7 +102,7 @@ export const networkPlugin = definePlugin({
         req.endTime = Date.now();
         req.size = params.encodedDataLength as number;
         pendingRequests.delete(req.id);
-        buffer.push(req);
+        getDeviceBuffer()?.push(req);
         fetchAndCacheBody(req);
       }
     });
@@ -108,16 +113,17 @@ export const networkPlugin = definePlugin({
         req.endTime = Date.now();
         req.error = params.errorText as string;
         pendingRequests.delete(req.id);
-        buffer.push(req);
+        getDeviceBuffer()?.push(req);
       }
     });
 
     ctx.cdp.on('disconnected', () => {
       const now = Date.now();
+      const buf = getDeviceBuffer();
       for (const [, req] of pendingRequests) {
         req.endTime = now;
         req.error = 'Connection lost';
-        buffer.push(req);
+        buf?.push(req);
       }
       pendingRequests.clear();
     });
@@ -128,15 +134,22 @@ export const networkPlugin = definePlugin({
 
     // ── Request tracking tools ─────────────────────────────────────────────────
 
+    function getRequests(device?: string): NetworkRequest[] {
+      if (device === 'all') return buffers.getAll();
+      const key = device || ctx.getActiveDeviceKey() || '';
+      return buffers.getAllForDevice(key);
+    }
+
     ctx.registerTool('get_network_requests', {
       description: 'Get recent network requests from the React Native app.',
       parameters: z.object({
         limit: z.number().default(50).describe('Maximum number of requests to return'),
         summary: z.boolean().default(false).describe('Return summary with counts'),
         compact: z.boolean().default(false).describe('Return compact single-line format'),
+        device: z.string().optional().describe('Device key or "all" for aggregated requests. Defaults to current device.'),
       }),
-      handler: async ({ limit, summary, compact: isCompact }) => {
-        const requests = buffer.getAll();
+      handler: async ({ limit, summary, compact: isCompact, device }) => {
+        const requests = getRequests(device);
 
         if (summary) {
           const total = requests.length;
@@ -175,9 +188,10 @@ export const networkPlugin = definePlugin({
       parameters: z.object({
         url: z.string().describe('URL or partial URL to find the request'),
         index: z.number().default(-1).describe('Index of the request if multiple match (-1 for last)'),
+        device: z.string().optional().describe('Device key or "all". Defaults to current device.'),
       }),
-      handler: async ({ url, index }) => {
-        const matches = buffer.filter((r) => r.url.includes(url));
+      handler: async ({ url, index, device }) => {
+        const matches = getRequests(device).filter((r) => r.url.includes(url));
         if (matches.length === 0) return `No requests found matching "${url}"`;
         const req = index === -1 ? matches[matches.length - 1] : matches[index];
         if (!req) return `Request index ${index} out of range (${matches.length} matches)`;
@@ -193,9 +207,10 @@ export const networkPlugin = definePlugin({
       parameters: z.object({
         url: z.string().describe('URL or partial URL to find the request'),
         index: z.number().default(-1).describe('Index of the request if multiple match (-1 for last)'),
+        device: z.string().optional().describe('Device key or "all". Defaults to current device.'),
       }),
-      handler: async ({ url, index }) => {
-        const matches = buffer.filter((r) => r.url.includes(url));
+      handler: async ({ url, index, device }) => {
+        const matches = getRequests(device).filter((r) => r.url.includes(url));
         if (matches.length === 0) return `No requests found matching "${url}"`;
         const req = index === -1 ? matches[matches.length - 1] : matches[index];
         if (!req) return `Request index ${index} out of range (${matches.length} matches)`;
@@ -237,9 +252,10 @@ export const networkPlugin = definePlugin({
         method: z.string().optional().describe('HTTP method filter'),
         statusCode: z.number().optional().describe('HTTP status code filter'),
         errorsOnly: z.boolean().default(false).describe('Show only failed requests'),
+        device: z.string().optional().describe('Device key or "all". Defaults to current device.'),
       }),
-      handler: async ({ urlPattern, method, statusCode, errorsOnly }) => {
-        let results = buffer.getAll();
+      handler: async ({ urlPattern, method, statusCode, errorsOnly, device }) => {
+        let results = getRequests(device);
         if (urlPattern) {
           const regex = new RegExp(urlPattern, 'i');
           results = results.filter((r) => regex.test(r.url));
@@ -259,10 +275,16 @@ export const networkPlugin = definePlugin({
 
     ctx.registerTool('clear_network_requests', {
       description: 'Clear the network request buffer. Useful after a reload or when old requests are no longer relevant.',
-      parameters: z.object({}),
-      handler: async () => {
-        const count = buffer.size;
-        buffer.clear();
+      parameters: z.object({
+        device: z.string().optional().describe('Device key to clear, or omit for current device. Use "all" to clear all.'),
+      }),
+      handler: async ({ device }) => {
+        const count = buffers.size;
+        if (device === 'all') {
+          buffers.clear();
+        } else {
+          buffers.clear(device || ctx.getActiveDeviceKey() || undefined);
+        }
         pendingRequests.clear();
         return `Cleared ${count} network requests.`;
       },
@@ -274,7 +296,8 @@ export const networkPlugin = definePlugin({
       name: 'Network Requests',
       description: 'Recent network requests from the React Native app',
       handler: async () => {
-        const requests = buffer.getLast(20);
+        const all = getRequests();
+        const requests = all.slice(-20);
         return JSON.stringify(
           requests.map((r) => ({
             method: r.method,

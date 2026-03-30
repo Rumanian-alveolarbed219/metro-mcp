@@ -96,6 +96,10 @@ export interface PluginContext {
   format: FormatUtils;
   /** Evaluate a JavaScript expression in the connected app runtime */
   evalInApp(expression: string, options?: EvalOptions): Promise<unknown>;
+  /** Returns the active device key (`${port}-${targetId}`), or null if not connected. */
+  getActiveDeviceKey(): string | null;
+  /** Returns a human-readable name for the active device, or null if not connected. */
+  getActiveDeviceName(): string | null;
 }
 
 // ── Logger ──

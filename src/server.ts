@@ -84,6 +84,11 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
   const eventsClient = new MetroEventsClient();
   const formatUtils = createFormatUtils();
 
+  // Active device tracking — used by plugins to key per-device buffers.
+  let activeDeviceKey: string | null = null;
+  let activeDeviceName: string | null = null;
+  const deviceNameMap = new Map<string, string>();
+
   // Server-side reconnect state — single source of truth for all reconnect logic.
   // Start with a very short delay (500ms) to recover quickly from brief disconnects
   // like hot reloads, then ramp up for longer outages.
@@ -249,6 +254,8 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
         return stdout;
       },
       format: formatUtils,
+      getActiveDeviceKey: () => activeDeviceKey,
+      getActiveDeviceName: () => activeDeviceName,
     };
   }
 
@@ -313,6 +320,12 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
 
       await cdpClient.connect(target);
       eventsClient.connect(server.host, server.port);
+
+      // Track active device for per-device buffers
+      activeDeviceKey = `${server.port}-${target.id}`;
+      activeDeviceName = target.title || target.deviceName || target.id;
+      deviceNameMap.set(activeDeviceKey, activeDeviceName);
+
       return true;
     } catch (err) {
       logger.warn('Could not connect to Metro:', err);
