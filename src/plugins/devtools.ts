@@ -4,6 +4,26 @@ import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('devtools');
 
+/**
+ * Well-known Chrome/Chromium binary paths by platform.
+ * Same locations that chrome-launcher and Metro's DefaultToolLauncher check.
+ */
+const CHROME_PATHS: Record<string, string[]> = {
+  darwin: [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  ],
+  linux: [
+    'google-chrome',
+    'google-chrome-stable',
+    'chromium-browser',
+    'chromium',
+    'microsoft-edge',
+  ],
+};
+
 export const devtoolsPlugin = definePlugin({
   name: 'devtools',
 
@@ -16,7 +36,7 @@ export const devtoolsPlugin = definePlugin({
         'Uses Metro\'s bundled DevTools frontend but connects through our CDP proxy ' +
         'so both DevTools and the MCP can share the single Hermes connection.',
       parameters: z.object({
-        open: z.boolean().default(true).describe('Attempt to open Chrome automatically (macOS only)'),
+        open: z.boolean().default(true).describe('Attempt to open Chrome automatically'),
       }),
       handler: async ({ open }) => {
         const config = ctx.config as Record<string, unknown>;
@@ -37,13 +57,29 @@ export const devtoolsPlugin = definePlugin({
 
         if (open) {
           try {
-            // Launch Chrome in app mode like Metro does (via DefaultToolLauncher)
-            await ctx.exec(
-              `/usr/bin/open -a "Google Chrome" --args --app="${frontendUrl}" --window-size=1200,600`
-            );
-            return { opened: true, url: frontendUrl };
-          } catch {
-            // Not macOS or Chrome not installed
+            // Spawn Chrome directly with --app flag, like Metro's DefaultToolLauncher.
+            // Using `open -a` doesn't work because it ignores --args when Chrome
+            // is already running. We need to spawn the binary directly.
+            const platform = await ctx.exec('uname -s').then(s => s.trim().toLowerCase());
+            const candidates = platform === 'darwin' ? CHROME_PATHS.darwin : CHROME_PATHS.linux;
+
+            if (candidates) {
+              for (const chromePath of candidates!) {
+                try {
+                  // Spawn detached so it doesn't block or die with the MCP process.
+                  // On macOS we need the full path; on Linux, commands in PATH work.
+                  await ctx.exec(
+                    `"${chromePath}" --app="${frontendUrl}" --window-size=1200,600 &`
+                  );
+                  return { opened: true, url: frontendUrl };
+                } catch {
+                  // This candidate not found, try next
+                  continue;
+                }
+              }
+            }
+          } catch (err) {
+            logger.debug('Failed to launch Chrome:', err);
           }
         }
 
