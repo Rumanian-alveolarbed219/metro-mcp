@@ -53,7 +53,12 @@ export const statuslinePlugin = definePlugin({
   description: 'Writes CDP connection state to a file for Claude Code status bar integration',
 
   async setup(ctx) {
-    function write(connected: boolean): void {
+    let lastConnected: boolean | null = null;
+
+    function write(): void {
+      const connected = ctx.cdp.isConnected();
+      if (connected === lastConnected) return;
+      lastConnected = connected;
       const target = ctx.cdp.getTarget();
       writeStatus({
         connected,
@@ -64,11 +69,14 @@ export const statuslinePlugin = definePlugin({
       });
     }
 
-    ctx.cdp.on('reconnected', () => write(true));
-    ctx.cdp.on('disconnected', () => write(false));
+    ctx.cdp.on('reconnected', write);
+    ctx.cdp.on('disconnected', write);
+
+    // Poll every 5s so the statusline self-corrects if an event is missed
+    setInterval(write, 5000);
 
     // Write initial state
-    write(ctx.cdp.isConnected());
+    write();
 
     ctx.registerTool('setup_statusline', {
       description:
