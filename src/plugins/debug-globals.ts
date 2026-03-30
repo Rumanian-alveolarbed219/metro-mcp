@@ -37,7 +37,7 @@ export const debugGlobalsPlugin = definePlugin({
           }
 
           // Also look for common Redux store patterns
-          var storeLocations = ['store', '__REDUX_STORE__', '__STORE__'];
+          var storeLocations = ['store', '__REDUX_STORE__', '__store__'];
           for (var j = 0; j < storeLocations.length; j++) {
             var loc = storeLocations[j];
             var s = globalThis[loc];

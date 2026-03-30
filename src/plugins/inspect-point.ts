@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { definePlugin } from '../plugin.js';
+import { FIBER_ROOT_JS } from '../utils/fiber.js';
 
 export const inspectPointPlugin = definePlugin({
   name: 'inspect-point',
@@ -19,21 +20,8 @@ export const inspectPointPlugin = definePlugin({
       }),
       handler: async ({ x, y, includeProps }) => {
         const expression = `(function() {
-          var hook = globalThis.__REACT_DEVTOOLS_GLOBAL_HOOK__;
-          if (!hook || !hook.renderers || hook.renderers.size === 0) {
-            return { error: 'React DevTools hook not available. Is the app running in __DEV__ mode?' };
-          }
-
-          // Get the first renderer
-          var renderer = hook.renderers.values().next().value;
-          if (!renderer) return { error: 'No React renderer found.' };
-
-          var fiberRoots = hook.getFiberRoots ? hook.getFiberRoots(1) : null;
-          if (!fiberRoots || fiberRoots.size === 0) {
-            return { error: 'No fiber roots found.' };
-          }
-          var root = fiberRoots.values().next().value;
-          if (!root || !root.current) return { error: 'No root fiber found.' };
+          ${FIBER_ROOT_JS}
+          if (!rootFiber) return { error: 'React fiber tree not available. Is the app running in __DEV__ mode?' };
 
           var targetX = ${x};
           var targetY = ${y};
@@ -87,7 +75,7 @@ export const inspectPointPlugin = definePlugin({
             if (fiber.sibling) walkFiber(fiber.sibling, depth);
           }
 
-          walkFiber(root.current, 0);
+          walkFiber(rootFiber, 0);
 
           if (!bestMatch) {
             return {
