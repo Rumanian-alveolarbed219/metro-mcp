@@ -35,12 +35,13 @@ export class CDPClient implements CDPConnection {
   private lastPingAt = 0;
 
   /**
-   * Optional interceptor for raw incoming CDP messages.
+   * Optional interceptor for parsed incoming CDP messages.
    * If set and returns true, the message is consumed by the interceptor
    * and won't be processed by CDPClient's own handleMessage logic.
    * Used by CDPProxy to route responses to external clients.
+   * Receives both the parsed message and the raw string to avoid double parsing.
    */
-  messageInterceptor: ((data: string) => boolean) | null = null;
+  messageInterceptor: ((parsed: CDPResponse, raw: string) => boolean) | null = null;
 
   private readonly requestTimeout = 10000;
   private readonly keepAliveInterval = 10000;
@@ -223,9 +224,6 @@ export class CDPClient implements CDPConnection {
   }
 
   private handleMessage(data: string): void {
-    // Let the interceptor handle the message first (used by CDPProxy)
-    if (this.messageInterceptor?.(data)) return;
-
     let message: CDPResponse;
     try {
       message = JSON.parse(data);
@@ -233,6 +231,9 @@ export class CDPClient implements CDPConnection {
       logger.warn('Failed to parse CDP message');
       return;
     }
+
+    // Let the interceptor handle the message first (used by CDPProxy)
+    if (this.messageInterceptor?.(message, data)) return;
 
     // Response to a request
     if (message.id !== undefined) {

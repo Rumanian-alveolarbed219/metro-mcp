@@ -7,6 +7,12 @@ import { wsDataToString } from '../utils/ws.js';
 
 const logger = createLogger('cdp-proxy');
 
+/** Timeout for pending proxy requests (ms). */
+const PENDING_REQUEST_TIMEOUT = 30_000;
+
+/** Domains that MCP itself needs — never disabled even if all external clients disconnect. */
+const PROTECTED_DOMAINS = new Set(['Runtime', 'Network']);
+
 interface ExternalClient {
   id: string;
   ws: WebSocket;
@@ -16,6 +22,7 @@ interface ExternalClient {
 interface PendingProxyRequest {
   clientId: string;
   originalId: number;
+  timer: ReturnType<typeof setTimeout>;
 }
 
 /**
@@ -43,7 +50,7 @@ export class CDPProxy {
   constructor(private readonly cdpClient: CDPClient) {
     // Install the message interceptor on CDPClient to intercept responses
     // destined for external clients and broadcast events.
-    cdpClient.messageInterceptor = (data: string) => this.handleUpstreamMessage(data);
+    cdpClient.messageInterceptor = (parsed: CDPResponse, raw: string) => this.handleUpstreamMessage(parsed, raw);
 
     // When the upstream reconnects, re-enable domains for connected external clients.
     cdpClient.on('reconnected', () => {
@@ -97,6 +104,9 @@ export class CDPProxy {
       try { client.ws.close(); } catch {}
     }
     this.clients.clear();
+    for (const pending of this.pendingRequests.values()) {
+      clearTimeout(pending.timer);
+    }
     this.pendingRequests.clear();
     this.domainRefCounts.clear();
 
@@ -231,13 +241,21 @@ export class CDPProxy {
 
     // Remap the ID and forward upstream
     const globalId = this.nextGlobalId++;
-    this.pendingRequests.set(globalId, { clientId: client.id, originalId: message.id });
+    const timer = setTimeout(() => {
+      this.pendingRequests.delete(globalId);
+      this.sendToClient(client, JSON.stringify({
+        id: message.id,
+        error: { code: -32000, message: 'CDP request timed out' },
+      }));
+    }, PENDING_REQUEST_TIMEOUT);
+    this.pendingRequests.set(globalId, { clientId: client.id, originalId: message.id, timer });
 
     const remapped = { ...message, id: globalId };
     try {
       this.cdpClient.sendRaw(JSON.stringify(remapped));
     } catch (err) {
       // Upstream not connected — send error back
+      clearTimeout(timer);
       this.pendingRequests.delete(globalId);
       this.sendToClient(client, JSON.stringify({
         id: message.id,
@@ -252,19 +270,13 @@ export class CDPProxy {
    * Intercept messages from Hermes before CDPClient processes them.
    * Returns true if the message was consumed (should not be processed by CDPClient).
    */
-  private handleUpstreamMessage(data: string): boolean {
-    let message: CDPResponse;
-    try {
-      message = JSON.parse(data);
-    } catch {
-      return false;
-    }
-
+  private handleUpstreamMessage(message: CDPResponse, raw: string): boolean {
     // Response to a request
     if (message.id !== undefined) {
       const pending = this.pendingRequests.get(message.id);
       if (pending) {
         // This response belongs to an external client — route it back
+        clearTimeout(pending.timer);
         this.pendingRequests.delete(message.id);
         const client = this.clients.get(pending.clientId);
         if (client) {
@@ -280,7 +292,7 @@ export class CDPProxy {
     // Event — broadcast to ALL external clients (CDPClient also handles it via its own handlers)
     if (message.method) {
       for (const client of this.clients.values()) {
-        this.sendToClient(client, data);
+        this.sendToClient(client, raw);
       }
     }
 
@@ -301,8 +313,9 @@ export class CDPProxy {
       const refCount = this.domainRefCounts.get(domain) || 0;
       if (refCount > 0) {
         this.domainRefCounts.set(domain, refCount - 1);
-        // If this was the last client using this domain, disable it upstream
-        if (refCount === 1) {
+        // If this was the last external client using this domain, disable it upstream
+        // — but never disable protected domains that MCP itself needs
+        if (refCount === 1 && !PROTECTED_DOMAINS.has(domain)) {
           try {
             this.cdpClient.sendRaw(JSON.stringify({
               id: this.nextGlobalId++,
@@ -317,6 +330,7 @@ export class CDPProxy {
     // Clean up any pending requests for this client
     for (const [globalId, pending] of this.pendingRequests) {
       if (pending.clientId === client.id) {
+        clearTimeout(pending.timer);
         this.pendingRequests.delete(globalId);
       }
     }
