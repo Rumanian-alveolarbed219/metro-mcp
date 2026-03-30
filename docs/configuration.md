@@ -6,6 +6,8 @@
 |----------|---------|-------------|
 | `METRO_HOST` | `localhost` | Metro bundler host |
 | `METRO_PORT` | `8081` | Metro bundler port |
+| `METRO_MCP_PROXY_ENABLED` | `true` | Enable the CDP proxy for Chrome DevTools coexistence |
+| `METRO_MCP_PROXY_PORT` | `0` (random) | Fixed port for the CDP proxy. Use `0` for a random available port |
 | `DEBUG` | — | Enable debug logging |
 
 ## CLI Arguments
@@ -43,11 +45,26 @@ export default defineConfig({
   network: {
     interceptFetch: false,  // Opt-in: inject JS to wrap fetch()
   },
+  proxy: {
+    enabled: true,   // CDP proxy for Chrome DevTools coexistence
+    port: 0,         // 0 = random available port
+  },
   profiler: {
     newArchitecture: true,  // Set to false for legacy bridge apps
   },
 });
 ```
+
+## CDP Proxy Options
+
+The CDP proxy allows Chrome DevTools to connect alongside the MCP, working around Hermes's single-connection limitation. See the [Chrome DevTools](../README.md#chrome-devtools) section in the README for details.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `proxy.enabled` | `true` | Enable the CDP proxy server. When enabled, external debuggers (Chrome DevTools, etc.) can connect to the proxy port and share the Hermes connection with the MCP. |
+| `proxy.port` | `0` | Port for the proxy's WebSocket + HTTP server. `0` picks a random available port. Set a fixed port if you need a stable URL. |
+
+The proxy also serves a `/json` endpoint for Chrome's target auto-discovery and a `/json/version` endpoint.
 
 ## Profiler Options
 

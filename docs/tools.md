@@ -9,10 +9,11 @@
 
 ### Request Tracking
 
-- **`get_network_requests`** — Get buffered HTTP requests with method, URL, status, timing.
+- **`get_network_requests`** — Get buffered HTTP requests with method, URL, status, timing. Supports `device` param for per-device filtering.
 - **`get_request_details`** — Get full headers for a specific request by URL.
 - **`get_response_body`** — Get the response body for a specific request. Bodies under 1 MB are eagerly cached and survive reconnections; larger bodies are fetched on demand from the current CDP session.
 - **`search_network`** — Filter by URL pattern, method, status code, or errors only.
+- **`get_network_stats`** — Aggregated network statistics: breakdown by domain, status code distribution, response time percentiles (p50/p95/p99), and slowest endpoints.
 - **`clear_network_requests`** — Clear the network request buffer.
 
 ## Errors
@@ -29,6 +30,7 @@
 - **`list_devices`** — List connected debuggable targets from Metro.
 - **`get_app_info`** — Bundle URL, platform, device name, VM type.
 - **`get_connection_status`** — CDP connection state and Metro status.
+- **`reload_app`** — Reload the app. Tries Metro's HTTP reload endpoint first, then falls back to `DevSettings.reload()` via CDP.
 
 ## Source
 
@@ -136,6 +138,22 @@ Records real user interactions via React fiber patching — no app code changes 
 - **`stop_test_recording`** — Stop recording and retrieve the captured event log. Deduplicates rapid-fire text input events (keeps the final value per field).
 - **`generate_test_from_recording`** — Convert the recording to a test file. Params: `format` (appium/maestro/detox), `testName`, `platform` (ios/android/both), `bundleId`, `includeSetup`.
 - **`generate_wdio_config`** — Generate a minimal `wdio.conf.ts` for Appium + React Native, including the install command for all required packages.
+
+## Chrome DevTools
+
+- **`open_devtools`** — Open the React Native DevTools debugger panel in Chrome (or Edge). Uses Metro's bundled rn_fusebox frontend but routes the WebSocket through the MCP's CDP proxy so both DevTools and the MCP can coexist. Finds Chrome/Edge automatically via `chrome-launcher`. See [Chrome DevTools](#) in the README for why you should use this instead of pressing "j" or tapping "Open Debugger".
+
+## Debug Globals
+
+> No app changes needed.
+
+- **`list_debug_globals`** — Auto-discover well-known global debugging objects in the app runtime: Redux stores, Apollo Client, Expo Router state, React DevTools hook, and more. Use `detailed=true` to include top-level keys for each discovered global.
+
+## Inspect Point (Experimental)
+
+> No app changes needed.
+
+- **`inspect_at_point`** — Inspect the React component rendered at specific screen coordinates. Walks the React fiber tree to find the host component whose layout contains the given (x, y) point, then walks up to find the nearest named React component. Returns component name, host element type, layout bounds, and optionally props. Layout measurement varies between Old and New Architecture.
 
 ## Token-Efficient Output
 
