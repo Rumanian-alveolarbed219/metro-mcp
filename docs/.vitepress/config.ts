@@ -10,12 +10,10 @@ export default defineConfig({
   ],
 
   themeConfig: {
-    logo: null,
-    siteTitle: 'metro-mcp',
-
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
-      { text: 'Tools Reference', link: '/tools' },
+      { text: 'Troubleshooting', link: '/troubleshooting' },
+      { text: 'Changelog', link: '/changelog' },
       { text: 'npm', link: 'https://www.npmjs.com/package/metro-mcp' },
     ],
 
@@ -25,12 +23,13 @@ export default defineConfig({
         items: [
           { text: 'Introduction', link: '/guide/getting-started' },
           { text: 'Configuration', link: '/configuration' },
+          { text: 'Troubleshooting', link: '/troubleshooting' },
         ],
       },
       {
         text: 'Guides',
         items: [
-          { text: 'App Integration (SDK)', link: '/sdk' },
+          { text: 'Client SDK', link: '/sdk' },
           { text: 'Custom Plugins', link: '/plugins' },
           { text: 'Profiling', link: '/profiling' },
           { text: 'Test Recording', link: '/testing' },
@@ -40,9 +39,12 @@ export default defineConfig({
         text: 'Reference',
         items: [
           { text: 'Tools', link: '/tools' },
+          { text: 'Changelog', link: '/changelog' },
         ],
       },
     ],
+
+    outline: 'deep',
 
     socialLinks: [
       { icon: 'github', link: 'https://github.com/steve228uk/metro-mcp' },

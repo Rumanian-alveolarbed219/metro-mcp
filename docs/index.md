@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: metro-mcp
-  text: React Native debugging via MCP
-  tagline: Connect AI agents to your running React Native app. Inspect components, track network requests, record tests, and more — no app code changes needed.
+  text: Debug React Native with AI
+  tagline: Connect Claude, Cursor, or any MCP client to your running app. Inspect components, track network requests, record tests, and more — no app code changes needed.
   actions:
     - theme: brand
       text: Get Started
@@ -36,3 +36,4 @@ features:
     title: Full control
     details: Inspect components, dispatch Redux actions, navigate, take screenshots, run JS — all from your AI agent.
 ---
+
