@@ -3,10 +3,10 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'metro-mcp',
   description: 'React Native runtime debugging, inspection, and automation via MCP',
-  base: '/metro-mcp/',
+  base: '/',
 
   head: [
-    ['link', { rel: 'icon', href: '/metro-mcp/favicon.ico' }],
+    ['link', { rel: 'icon', href: '/favicon.ico' }],
   ],
 
   themeConfig: {
