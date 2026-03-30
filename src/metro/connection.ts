@@ -32,7 +32,7 @@ export class CDPClient implements CDPConnection {
   private suppressReconnect = false;
   private _isConnected = false;
   private target: MetroTarget | null = null;
-  private pongReceived = false;
+  private lastPingAt = 0;
 
   private readonly requestTimeout = 10000;
   private readonly keepAliveInterval = 10000;
@@ -71,7 +71,7 @@ export class CDPClient implements CDPConnection {
 
         this.ws.on('open', () => {
           this._isConnected = true;
-          this.pongReceived = true;
+          this.lastPingAt = Date.now();
           this.startKeepAlive();
           logger.info(`Connected to ${this.target?.title || 'unknown'}`);
           resolve();
@@ -103,15 +103,10 @@ export class CDPClient implements CDPConnection {
         });
 
         // Metro's InspectorProxy sends pings every 5s — ws auto-responds with pong.
-        // Log for diagnostics.
+        // Track the last ping time so keepalive can detect a silently dead connection.
         this.ws.on('ping', () => {
+          this.lastPingAt = Date.now();
           logger.debug('Received ping from Metro');
-        });
-
-        // Track pong responses to our own pings (sent by startKeepAlive).
-        this.ws.on('pong', () => {
-          this.pongReceived = true;
-          logger.debug('Received pong from Metro');
         });
       } catch (err) {
         reject(err);
@@ -189,23 +184,15 @@ export class CDPClient implements CDPConnection {
 
   private startKeepAlive(): void {
     this.stopKeepAlive();
-    let missedKeepAlives = 0;
     this.keepAliveTimer = setInterval(() => {
       if (!this._isConnected || !this.ws) return;
 
-      if (!this.pongReceived) {
-        missedKeepAlives++;
-        if (missedKeepAlives >= 3) {
-          logger.warn(`${missedKeepAlives} consecutive pongs missed — closing connection`);
-          try { this.ws.close(); } catch {}
-          return;
-        }
-      } else {
-        missedKeepAlives = 0;
+      // Metro sends pings every 5s. If we haven't received one in 20s the connection is dead.
+      const elapsed = Date.now() - this.lastPingAt;
+      if (elapsed > 20000) {
+        logger.warn(`No ping received from Metro in ${elapsed}ms — closing connection`);
+        try { this.ws.close(); } catch {}
       }
-
-      this.pongReceived = false;
-      this.ws.ping();
     }, this.keepAliveInterval);
   }
 
