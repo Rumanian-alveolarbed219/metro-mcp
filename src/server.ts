@@ -391,6 +391,10 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
   await mcpServer.connect(transport);
   logger.info('MCP server started');
 
+  // Clean up on shutdown
+  process.on('SIGINT', () => { cdpProxy?.stop(); process.exit(0); });
+  process.on('SIGTERM', () => { cdpProxy?.stop(); process.exit(0); });
+
   // Try connecting to Metro (non-blocking — server works without connection)
   void connectToMetro();
 }
