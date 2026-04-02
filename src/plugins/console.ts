@@ -35,10 +35,6 @@ interface CDPPropertyPreview {
   valuePreview?: CDPObjectPreview;
 }
 
-/**
- * Format a CDP ObjectPreview into a readable string.
- * Handles nested objects/arrays via recursive valuePreview traversal.
- */
 function formatPreview(preview: CDPObjectPreview): string | null {
   if (!preview.properties) return null;
 
@@ -85,10 +81,6 @@ function formatCDPArgs(args: unknown[]): string {
     .join(' ');
 }
 
-/**
- * Resolve a RemoteObject deeply by calling JSON.stringify on it in the app runtime.
- * Uses CDP Runtime.callFunctionOn with the object's objectId.
- */
 async function resolveRemoteObject(
   cdpSend: (method: string, params?: Record<string, unknown>) => Promise<unknown>,
   objectId: string,
@@ -107,10 +99,6 @@ async function resolveRemoteObject(
   }
 }
 
-/**
- * Asynchronously resolve all object args in a console log via CDP.
- * Falls back to formatRemoteObject for non-object args or if resolution fails.
- */
 async function formatCDPArgsDeep(
   cdpSend: (method: string, params?: Record<string, unknown>) => Promise<unknown>,
   args: unknown[],
@@ -136,6 +124,7 @@ export const consolePlugin = definePlugin({
 
   async setup(ctx) {
     const buffers = new DeviceBufferManager<LogEntry>(500);
+    const cdpSend = ctx.cdp.send.bind(ctx.cdp);
 
     ctx.cdp.on('Runtime.consoleAPICalled', (params) => {
       const key = ctx.getActiveDeviceKey();
@@ -152,18 +141,17 @@ export const consolePlugin = definePlugin({
       };
       buffers.getOrCreate(key).push(entry);
 
-      // Asynchronously resolve objects deeply via CDP and update the entry in-place.
-      // ObjectIds are short-lived, so this must happen promptly after the log event.
-      const cdpSend = ctx.cdp.send.bind(ctx.cdp);
-      formatCDPArgsDeep(cdpSend, args)
-        .then((deep) => {
-          if (deep !== entry.message) {
-            entry.message = deep;
-          }
-        })
-        .catch(() => {
-          // Keep the shallow fallback on failure
-        });
+      // ObjectIds are short-lived, so resolve promptly after the log event.
+      const hasResolvable = args.some(
+        (arg) => typeof arg === 'object' && arg !== null && (arg as CDPRemoteObject).objectId,
+      );
+      if (hasResolvable) {
+        formatCDPArgsDeep(cdpSend, args)
+          .then((deep) => {
+            if (deep !== entry.message) entry.message = deep;
+          })
+          .catch(() => {});
+      }
     });
 
     // Mark when Metro starts rebuilding — a reload is imminent.
