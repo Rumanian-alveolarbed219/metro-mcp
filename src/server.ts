@@ -451,7 +451,14 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
   if (config.proxy?.enabled !== false) {
     cdpProxy = new CDPProxy(cdpClient);
     try {
-      const proxyPort = await cdpProxy.start(config.proxy?.port ?? 0);
+      let preferredProxyPort = config.proxy?.port ?? 0;
+      if (preferredProxyPort === 0) {
+        try {
+          const stale = JSON.parse(fs.readFileSync(PROXY_LOCK_FILE, 'utf8'));
+          if (stale.port) preferredProxyPort = stale.port;
+        } catch { /* no stale lock */ }
+      }
+      const proxyPort = await cdpProxy.start(preferredProxyPort);
       const devtoolsUrl = cdpProxy.getDevToolsUrl();
       logger.info(`CDP proxy started on port ${proxyPort}`);
       if (devtoolsUrl) {
