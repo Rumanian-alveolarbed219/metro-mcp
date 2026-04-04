@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { CircularBuffer } from './utils/buffer.js';
+import type { MetroTarget } from 'metro-bridge';
 
 // ── CDP Connection Interface ──
 
@@ -7,9 +8,9 @@ export interface CDPConnection {
   send(method: string, params?: Record<string, unknown>): Promise<unknown>;
   on(event: string, handler: (params: Record<string, unknown>) => void): void;
   off(event: string, handler: (params: Record<string, unknown>) => void): void;
-  isConnected(): boolean;
+  isConnected: boolean;
   /** Returns metadata about the currently connected CDP target, or null if not connected. */
-  getTarget(): { description?: string; reactNative?: { capabilities?: { prefersFuseboxFrontend?: boolean } } } | null;
+  getTarget(): MetroTarget | null;
 }
 
 // ── Format Utilities ──
