@@ -56,7 +56,7 @@ export const statuslinePlugin = definePlugin({
     let lastConnected: boolean | null = null;
 
     function write(): void {
-      const connected = ctx.cdp.isConnected();
+      const connected = ctx.cdp.isConnected;
       if (connected === lastConnected) return;
       lastConnected = connected;
       const target = ctx.cdp.getTarget();

@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { definePlugin } from '../plugin.js';
-import { scanMetroPorts, fetchTargets, checkMetroStatus } from '../metro/discovery.js';
-import type { CDPClient } from '../metro/connection.js';
+import { scanMetroPorts, fetchTargets, checkMetroStatus } from 'metro-bridge';
 
 export const devicePlugin = definePlugin({
   name: 'device',
@@ -49,12 +48,11 @@ export const devicePlugin = definePlugin({
       description: 'Get information about the connected React Native app (bundle URL, platform, device name).',
       parameters: z.object({}),
       handler: async () => {
-        if (!ctx.cdp.isConnected()) {
+        if (!ctx.cdp.isConnected) {
           return 'Not connected to Metro. Start your React Native app and try again.';
         }
 
-        const cdpClient = ctx.cdp as CDPClient;
-        const target = cdpClient.getTarget();
+        const target = ctx.cdp.getTarget();
         if (!target) return 'No target info available.';
 
         return {
@@ -79,7 +77,7 @@ export const devicePlugin = definePlugin({
 
         const status = await checkMetroStatus(host, port);
         return {
-          cdpConnected: ctx.cdp.isConnected(),
+          cdpConnected: ctx.cdp.isConnected,
           metroStatus: status || 'unreachable',
           metroUrl: `http://${host}:${port}`,
         };
@@ -127,11 +125,10 @@ export const devicePlugin = definePlugin({
       name: 'Connection Status',
       description: 'Current connection status to Metro bundler',
       handler: async () => {
-        const cdpClient = ctx.cdp as CDPClient;
-        const target = cdpClient.getTarget();
+        const target = ctx.cdp.getTarget();
         return JSON.stringify(
           {
-            connected: ctx.cdp.isConnected(),
+            connected: ctx.cdp.isConnected,
             target: target
               ? { title: target.title, deviceName: target.deviceName }
               : null,

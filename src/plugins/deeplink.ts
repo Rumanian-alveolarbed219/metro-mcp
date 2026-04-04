@@ -48,7 +48,7 @@ export const deeplinkPlugin = definePlugin({
       handler: async ({ bundleId }) => {
         // Try to get URL schemes from the app via evaluate
         try {
-          if (ctx.cdp.isConnected()) {
+          if (ctx.cdp.isConnected) {
             const result = (await ctx.cdp.send('Runtime.evaluate', {
               expression: `
                 (function() {

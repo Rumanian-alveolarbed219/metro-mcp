@@ -15,10 +15,9 @@ import type {
   PromptConfig,
   EvalOptions,
 } from './plugin.js';
-import { CDPClient } from './metro/connection.js';
+import { CDPSession, CDPMultiplexer, scanMetroPorts, selectBestTarget, fetchTargets } from 'metro-bridge';
+import type { MetroTarget } from 'metro-bridge';
 import { MetroEventsClient } from './metro/events.js';
-import { scanMetroPorts, selectBestTarget, fetchTargets } from './metro/discovery.js';
-import type { MetroTarget } from './metro/types.js';
 import { createLogger } from './utils/logger.js';
 import { createFormatUtils } from './utils/format.js';
 import { extractCDPExceptionMessage } from './utils/cdp.js';
@@ -48,7 +47,6 @@ import { statuslinePlugin } from './plugins/statusline.js';
 import { debugGlobalsPlugin } from './plugins/debug-globals.js';
 import { inspectPointPlugin } from './plugins/inspect-point.js';
 import { devtoolsPlugin } from './plugins/devtools.js';
-import { CDPProxy } from './metro/proxy.js';
 
 const logger = createLogger('server');
 
@@ -89,7 +87,7 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
     }
   );
 
-  const cdpClient = new CDPClient();
+  const cdpSession = new CDPSession();
   const eventsClient = new MetroEventsClient();
   const formatUtils = createFormatUtils();
 
@@ -116,18 +114,18 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
   }
 
   // Enable required CDP domains on every connection (initial and reconnect).
-  cdpClient.on('reconnected', async () => {
+  cdpSession.on('reconnected', async () => {
     reconnectAttempts = 0;
     isReconnecting = false;
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     await Promise.all([
-      cdpClient.send('Runtime.enable').catch(() => {}),
-      cdpClient.send('Network.enable').catch(() => {}),
+      cdpSession.send('Runtime.enable').catch(() => {}),
+      cdpSession.send('Network.enable').catch(() => {}),
     ]);
   });
 
   // Drive all reconnection through connectToMetro() so we always get a fresh target URL.
-  cdpClient.on('disconnected', () => {
+  cdpSession.on('disconnected', () => {
     scheduleReconnect();
   });
 
@@ -135,7 +133,7 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
   function createPluginContext(plugin: PluginDefinition): PluginContext {
     const pluginLogger = createLogger(plugin.name);
     return {
-      cdp: cdpClient,
+      cdp: cdpSession,
       events: eventsClient,
       registerTool: <T extends z.ZodType>(name: string, toolConfig: ToolConfig<T>) => {
         try {
@@ -207,19 +205,19 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
       },
       evalInApp: async (expression: string, options?: EvalOptions) => {
         async function tryEval() {
-          if (!cdpClient.isConnected()) {
+          if (!cdpSession.isConnected) {
             if (isReconnecting) {
               // A reconnect is already in flight — wait for it rather than starting another
               await waitForReconnect();
             } else {
-              const connected = await cdpClient.waitForConnection();
+              const connected = await cdpSession.waitForConnection();
               if (!connected) await connectToMetro();
             }
           }
-          if (!cdpClient.isConnected()) {
+          if (!cdpSession.isConnected) {
             throw new Error('Not connected to Metro. Use list_devices to check connection status.');
           }
-          const result = (await cdpClient.send('Runtime.evaluate', {
+          const result = (await cdpSession.send('Runtime.evaluate', {
             expression,
             returnByValue: true,
             awaitPromise: options?.awaitPromise ?? false,
@@ -318,7 +316,7 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
           logger.info(
             `Found existing metro-mcp proxy (PID ${lockData.pid}, port ${lockData.port}) — connecting as secondary`
           );
-          await cdpClient.connect(targets[0] as unknown as MetroTarget);
+          await cdpSession.connectToTarget(targets[0] as unknown as MetroTarget);
           if (lockData.metroPort) {
             eventsClient.connect(config.metro.host!, lockData.metroPort);
             config.metro.port = lockData.metroPort;
@@ -369,7 +367,7 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
   async function connectToMetro(): Promise<boolean> {
     if (isReconnecting) {
       await waitForReconnect();
-      return cdpClient.isConnected();
+      return cdpSession.isConnected;
     }
     isReconnecting = true;
     try {
@@ -400,7 +398,7 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
         return false;
       }
 
-      await cdpClient.connect(target);
+      await cdpSession.connectToTarget(target);
       eventsClient.connect(server.host, server.port);
 
       // Track active device for per-device buffers
@@ -447,9 +445,9 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
   }
 
   // Start CDP proxy for Chrome DevTools coexistence
-  let cdpProxy: CDPProxy | null = null;
+  let cdpMultiplexer: CDPMultiplexer | null = null;
   if (config.proxy?.enabled !== false) {
-    cdpProxy = new CDPProxy(cdpClient);
+    cdpMultiplexer = new CDPMultiplexer(cdpSession, { protectedDomains: ['Runtime', 'Network'] });
     try {
       let preferredProxyPort = config.proxy?.port ?? 0;
       if (preferredProxyPort === 0) {
@@ -458,8 +456,8 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
           if (stale.port) preferredProxyPort = stale.port;
         } catch { /* no stale lock */ }
       }
-      const proxyPort = await cdpProxy.start(preferredProxyPort);
-      const devtoolsUrl = cdpProxy.getDevToolsUrl();
+      const proxyPort = await cdpMultiplexer.start(preferredProxyPort);
+      const devtoolsUrl = cdpMultiplexer.getDevToolsUrl();
       logger.info(`CDP proxy started on port ${proxyPort}`);
       if (devtoolsUrl) {
         logger.info(`Chrome DevTools URL: ${devtoolsUrl}`);
@@ -481,8 +479,8 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
   logger.info('MCP server started');
 
   // Clean up on shutdown
-  process.on('SIGINT', () => { cleanProxyLock(); cdpProxy?.stop(); process.exit(0); });
-  process.on('SIGTERM', () => { cleanProxyLock(); cdpProxy?.stop(); process.exit(0); });
+  process.on('SIGINT', () => { cleanProxyLock(); cdpMultiplexer?.stop(); process.exit(0); });
+  process.on('SIGTERM', () => { cleanProxyLock(); cdpMultiplexer?.stop(); process.exit(0); });
   process.on('exit', () => { cleanProxyLock(); });
 
   // Try connecting to Metro (non-blocking — server works without connection)
