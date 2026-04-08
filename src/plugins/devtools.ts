@@ -96,13 +96,22 @@ export const devtoolsPlugin = definePlugin({
         }
 
         if (supportsMultipleDebuggers(target)) {
-          let wsHost: string;
-          try {
-            wsHost = new URL(target.webSocketDebuggerUrl).host;
-          } catch {
-            return 'Could not parse Metro WebSocket URL. Try reconnecting.';
+          // Prefer the devtoolsFrontendUrl Metro provides — it encodes the exact
+          // device+page path in the `ws` query param, which is what DevTools needs
+          // to connect to the right session. Falling back to just the host (as we
+          // used to do) opens a generic target-picker that doesn't auto-connect.
+          let frontendUrl: string;
+          if (target.devtoolsFrontendUrl) {
+            frontendUrl = `http://${ctx.metro.host}:${ctx.metro.port}${target.devtoolsFrontendUrl}`;
+          } else {
+            let wsHost: string;
+            try {
+              wsHost = new URL(target.webSocketDebuggerUrl).host;
+            } catch {
+              return 'Could not parse Metro WebSocket URL. Try reconnecting.';
+            }
+            frontendUrl = buildFrontendUrl(ctx.metro.host, ctx.metro.port, wsHost);
           }
-          const frontendUrl = buildFrontendUrl(ctx.metro.host, ctx.metro.port, wsHost);
 
           if (open) {
             try {
