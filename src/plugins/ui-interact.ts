@@ -1,7 +1,7 @@
 import { readFile } from 'fs/promises';
 import { z } from 'zod';
 import { definePlugin } from '../plugin.js';
-import { FIBER_ROOT_JS, GET_ROUTE_FUNC_JS, SWIPE_COORDS } from '../utils/fiber.js';
+import { FIBER_ROOT_JS, FIND_AND_INVOKE_JS, GET_ROUTE_FUNC_JS, SWIPE_COORDS } from '../utils/fiber.js';
 
 // Module-level caches — persist across tool handler calls for the lifetime of the server.
 let idbAvailableCache: boolean | null = null;
@@ -157,39 +157,8 @@ export const uiInteractPlugin = definePlugin({
         const tapped = await ctx.evalInApp(`
           (function() {
             ${FIBER_ROOT_JS}
-            var needle = ${jsLabel};
-            // Step 1: find fiber by testID/label (onPress not required here)
-            var target = null;
-            var stack = [rootFiber];
-            while (stack.length && !target) {
-              var fiber = stack.pop();
-              if (!fiber) continue;
-              var props = fiber.memoizedProps || {};
-              if (props.accessibilityLabel === needle ||
-                  props['aria-label'] === needle ||
-                  props.testID === needle) {
-                target = fiber;
-              } else {
-                if (fiber.sibling) stack.push(fiber.sibling);
-                if (fiber.child) stack.push(fiber.child);
-              }
-            }
-            if (!target) return false;
-            // Step 2: use matched fiber if it has onPress, otherwise walk up to nearest ancestor
-            var pressable = (target.memoizedProps && target.memoizedProps.onPress) ? target : null;
-            if (!pressable) {
-              var ancestor = target.return;
-              while (ancestor) {
-                if (ancestor.memoizedProps && ancestor.memoizedProps.onPress) {
-                  pressable = ancestor;
-                  break;
-                }
-                ancestor = ancestor.return;
-              }
-            }
-            if (!pressable) return false;
-            pressable.memoizedProps.onPress({ nativeEvent: {} });
-            return true;
+            ${FIND_AND_INVOKE_JS}
+            return findAndInvoke(${jsLabel}, 'onPress');
           })()
         `).catch(() => false);
         if (tapped) return `Tapped "${label}"`;
@@ -337,39 +306,8 @@ export const uiInteractPlugin = definePlugin({
           const pressed = await ctx.evalInApp(`
             (function() {
               ${FIBER_ROOT_JS}
-              var needle = ${jsLabel};
-              // Step 1: find fiber by testID/label (onLongPress not required here)
-              var target = null;
-              var stack = [rootFiber];
-              while (stack.length && !target) {
-                var fiber = stack.pop();
-                if (!fiber) continue;
-                var props = fiber.memoizedProps || {};
-                if (props.accessibilityLabel === needle ||
-                    props['aria-label'] === needle ||
-                    props.testID === needle) {
-                  target = fiber;
-                } else {
-                  if (fiber.sibling) stack.push(fiber.sibling);
-                  if (fiber.child) stack.push(fiber.child);
-                }
-              }
-              if (!target) return false;
-              // Step 2: use matched fiber if it has onLongPress, otherwise walk up to nearest ancestor
-              var pressable = (target.memoizedProps && target.memoizedProps.onLongPress) ? target : null;
-              if (!pressable) {
-                var ancestor = target.return;
-                while (ancestor) {
-                  if (ancestor.memoizedProps && ancestor.memoizedProps.onLongPress) {
-                    pressable = ancestor;
-                    break;
-                  }
-                  ancestor = ancestor.return;
-                }
-              }
-              if (!pressable) return false;
-              pressable.memoizedProps.onLongPress({ nativeEvent: {} });
-              return true;
+              ${FIND_AND_INVOKE_JS}
+              return findAndInvoke(${jsLabel}, 'onLongPress');
             })()
           `).catch(() => false);
           if (pressed) return `Long pressed "${label}"`;
