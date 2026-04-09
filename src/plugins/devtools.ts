@@ -86,6 +86,7 @@ export const devtoolsPlugin = definePlugin({
         'On RN 0.85+ connects directly to Metro (no proxy needed). ' +
         'On older RN versions connects through the CDP proxy so both ' +
         'DevTools and the MCP can share the single Hermes connection.',
+      annotations: { openWorldHint: true },
       parameters: z.object({
         open: z.boolean().default(true).describe('Attempt to open the browser automatically'),
       }),

@@ -453,6 +453,7 @@ export const profilerPlugin = definePlugin({
         'captures all component render durations without requiring <Profiler> wrappers, works on all architectures. ' +
         'Fallback (legacy arch only): CDP Profiler domain for JS CPU call-graph sampling. ' +
         'Perform the interaction you want to measure, then call stop_profiling.',
+      annotations: { destructiveHint: false, idempotentHint: false },
       parameters: z.object({
         samplingInterval: z
           .number().int().min(100).max(100_000).default(1_000)
@@ -514,6 +515,7 @@ export const profilerPlugin = definePlugin({
         'DevTools hook mode: returns top components by total render duration across all commits. ' +
         'CDP mode: returns top JS functions by self time and total time. ' +
         'Must call start_profiling first.',
+      annotations: { readOnlyHint: false, idempotentHint: false },
       parameters: z.object({
         topN: z.number().int().min(1).max(100).default(20)
           .describe('Number of top entries to return.'),
@@ -600,6 +602,7 @@ export const profilerPlugin = definePlugin({
 
     ctx.registerTool('get_profile_status', {
       description: 'Check whether profiling is active, which mode is in use, and whether a previous profile is available.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({}),
       handler: async () => ({
         isProfiling: profilingMode !== null,
@@ -618,6 +621,7 @@ export const profilerPlugin = definePlugin({
         'Shows React DevTools component profile (if captured), CPU flamegraph (if CDP profile captured), ' +
         'and React render data from <Profiler> components (if set up). ' +
         'Call stop_profiling first to populate the profile data.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({}),
       handler: buildFlamegraphText,
     });
@@ -627,6 +631,7 @@ export const profilerPlugin = definePlugin({
         'Read React render timing data collected via <Profiler onRender={trackRender}>. ' +
         'Returns all recorded renders sorted by actualDuration descending, with memoization savings from baseDuration. ' +
         'Requires importing trackRender from metro-mcp/client. Use clear=true to reset the buffer.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         clear: z.boolean().default(false).describe('Clear the render buffer after reading.'),
       }),
@@ -653,6 +658,7 @@ export const profilerPlugin = definePlugin({
         'Get current JavaScript heap memory usage from the running app. ' +
         'Returns used heap, total heap, and heap size limit (when available). ' +
         'Call repeatedly to track memory growth over time or to detect leaks.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({}),
       handler: async () => {
         const result = (await ctx.evalInApp(`(function() {
@@ -695,6 +701,7 @@ export const profilerPlugin = definePlugin({
         'Starts profiling, evaluates the expression, waits for it to complete (plus optional extra duration), ' +
         'then stops and returns the top functions by self time. ' +
         'Use instead of calling start_profiling / stop_profiling manually for focused measurements.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         expression: z.string()
           .describe('JavaScript expression to profile (can be an async IIFE)'),
@@ -703,12 +710,13 @@ export const profilerPlugin = definePlugin({
         topN: z.number().int().min(1).max(50).default(15)
           .describe('Number of top functions to return'),
       }),
-      handler: async ({ expression, extraMs, topN }) => {
+      handler: async ({ expression, extraMs, topN }, { sendProgress }) => {
         if (profilingMode !== null) {
           return 'A profiling session is already active. Call stop_profiling first.';
         }
 
         // Start
+        await sendProgress?.(0, 3, 'Starting profiler…');
         let startedMode: ProfilingMode = null;
         try {
           const r = (await ctx.evalInApp(DEVTOOLS_START_EXPR)) as { ok?: boolean; method?: string } | null;
@@ -731,6 +739,7 @@ export const profilerPlugin = definePlugin({
         profilingMode = startedMode;
 
         // Evaluate expression
+        await sendProgress?.(1, 3, 'Evaluating expression…');
         try {
           await ctx.evalInApp(expression, { awaitPromise: true, timeout: 30000 });
         } catch (err) {
@@ -742,6 +751,7 @@ export const profilerPlugin = definePlugin({
         if (extraMs > 0) {
           await new Promise<void>((r) => setTimeout(r, extraMs));
         }
+        await sendProgress?.(2, 3, 'Analysing profile…');
 
         // Stop — reuse stop_profiling logic inline
         try {
@@ -796,6 +806,7 @@ export const profilerPlugin = definePlugin({
         'Start Hermes heap allocation sampling via CDP HeapProfiler. ' +
         'Records memory allocation call stacks to identify where objects are being allocated. ' +
         'Call stop_heap_sampling to retrieve the top allocation sites.',
+      annotations: { destructiveHint: false, idempotentHint: false },
       parameters: z.object({
         samplingInterval: z.number().int().min(128).max(1048576).default(32768)
           .describe('Average bytes between samples (default 32768). Lower = more detail, higher overhead.'),
@@ -816,6 +827,7 @@ export const profilerPlugin = definePlugin({
         'Stop heap allocation sampling and return the top allocation sites. ' +
         'Shows which functions are allocating the most memory, useful for diagnosing memory leaks. ' +
         'Must call start_heap_sampling first.',
+      annotations: { readOnlyHint: false, idempotentHint: false },
       parameters: z.object({
         topN: z.number().int().min(1).max(100).default(20)
           .describe('Number of top allocation sites to return'),

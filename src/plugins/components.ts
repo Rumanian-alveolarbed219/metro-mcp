@@ -99,6 +99,7 @@ export const componentsPlugin = definePlugin({
     ctx.registerTool('get_component_tree', {
       description:
         'Get the React component tree of the running app. Use structureOnly=true for a compact view (~1-3KB).',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         structureOnly: z.boolean().default(false).describe('Return only component names without props/state'),
         maxDepth: z.number().default(30).describe('Maximum depth to traverse'),
@@ -116,6 +117,7 @@ export const componentsPlugin = definePlugin({
 
     ctx.registerTool('find_components', {
       description: 'Search for components by name pattern in the React tree.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         pattern: z.string().describe('Component name or pattern to search for'),
         includeProps: z.boolean().default(true).describe('Include component props in results'),
@@ -153,6 +155,7 @@ export const componentsPlugin = definePlugin({
 
     ctx.registerTool('inspect_component', {
       description: 'Get detailed props, state, and hooks info for a specific component.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         name: z.string().describe('Exact component name to inspect'),
       }),
@@ -236,6 +239,7 @@ export const componentsPlugin = definePlugin({
     ctx.registerTool('get_testable_elements', {
       description:
         'Get all elements with testID or accessibilityLabel — useful for test generation.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({}),
       handler: async () => {
         const options = JSON.stringify({

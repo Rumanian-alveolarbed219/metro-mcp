@@ -69,6 +69,7 @@ export const navigationPlugin = definePlugin({
     ctx.registerTool('get_navigation_state', {
       description:
         'Get the full React Navigation / Expo Router state tree including current route, params, and stack history.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         compact: z.boolean().default(false).describe('Return compact format'),
       }),
@@ -95,6 +96,7 @@ export const navigationPlugin = definePlugin({
 
     ctx.registerTool('get_current_route', {
       description: 'Get the currently focused route name and params.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({}),
       handler: async () => {
         const state = await ctx.evalInApp(GET_NAV_STATE_EXPR, { awaitPromise: true });
@@ -107,6 +109,7 @@ export const navigationPlugin = definePlugin({
 
     ctx.registerTool('get_route_history', {
       description: 'Get the navigation back stack / history.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({}),
       handler: async () => {
         const state = await ctx.evalInApp(GET_NAV_STATE_EXPR, { awaitPromise: true });
@@ -127,6 +130,7 @@ export const navigationPlugin = definePlugin({
 
     ctx.registerTool('list_routes', {
       description: 'List all registered route names in the app.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({}),
       handler: async () => {
         const state = await ctx.evalInApp(GET_NAV_STATE_EXPR, { awaitPromise: true });

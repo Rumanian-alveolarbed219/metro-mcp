@@ -22,6 +22,7 @@ export const commandsPlugin = definePlugin({
     ctx.registerTool('list_commands', {
       description:
         'List all custom commands registered by the app. Commands are registered on global.__METRO_BRIDGE__.commands or global.__METRO_BRIDGE_COMMANDS__.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({}),
       handler: async () => {
         const result = await ctx.evalInApp(`
@@ -43,6 +44,7 @@ export const commandsPlugin = definePlugin({
     ctx.registerTool('run_command', {
       description:
         'Execute a custom command registered by the app. Pass parameters as a JSON object.',
+      annotations: { destructiveHint: true, openWorldHint: true },
       parameters: z.object({
         name: z.string().describe('Command name to execute'),
         params: z.record(z.unknown()).optional().describe('Parameters to pass to the command'),

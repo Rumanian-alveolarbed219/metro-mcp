@@ -121,6 +121,7 @@ export const networkPlugin = definePlugin({
         req.size = params.encodedDataLength as number;
         pendingRequests.delete(req.id);
         getDeviceBuffer()?.push(req);
+        ctx.notifyResourceUpdated('metro://network');
         fetchAndCacheBody(req);
       }
     });
@@ -132,6 +133,7 @@ export const networkPlugin = definePlugin({
         req.error = params.errorText as string;
         pendingRequests.delete(req.id);
         getDeviceBuffer()?.push(req);
+        ctx.notifyResourceUpdated('metro://network');
       }
     });
 
@@ -158,6 +160,7 @@ export const networkPlugin = definePlugin({
 
     ctx.registerTool('get_network_requests', {
       description: 'Get recent network requests from the React Native app.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         limit: z.number().default(50).describe('Maximum number of requests to return'),
         summary: z.boolean().default(false).describe('Return summary with counts'),
@@ -201,6 +204,7 @@ export const networkPlugin = definePlugin({
 
     ctx.registerTool('get_request_details', {
       description: 'Get full details of a specific network request including headers and body.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         url: z.string().describe('URL or partial URL to find the request'),
         index: z.number().default(-1).describe('Index of the request if multiple match (-1 for last)'),
@@ -220,6 +224,7 @@ export const networkPlugin = definePlugin({
         'Get the response body for a specific network request. ' +
         'Bodies are eagerly cached when small enough, so they survive reconnections. ' +
         'Larger bodies are fetched on demand and only available in the current CDP session.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         url: z.string().describe('URL or partial URL to find the request'),
         index: z.number().default(-1).describe('Index of the request if multiple match (-1 for last)'),
@@ -263,6 +268,7 @@ export const networkPlugin = definePlugin({
 
     ctx.registerTool('search_network', {
       description: 'Search network requests by URL pattern, method, or status code.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         urlPattern: z.string().optional().describe('URL substring or regex pattern'),
         method: z.string().optional().describe('HTTP method filter'),
@@ -291,6 +297,7 @@ export const networkPlugin = definePlugin({
 
     ctx.registerTool('clear_network_requests', {
       description: 'Clear the network request buffer. Useful after a reload or when old requests are no longer relevant.',
+      annotations: { destructiveHint: true, idempotentHint: true },
       parameters: z.object({
         device: z.string().optional().describe('Device key to clear, or omit for current device. Use "all" to clear all.'),
       }),
@@ -308,6 +315,7 @@ export const networkPlugin = definePlugin({
 
     ctx.registerTool('get_network_stats', {
       description: 'Get aggregated network statistics: breakdown by domain, status code, and response times.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         device: z.string().optional().describe('Device key or "all". Defaults to current device.'),
       }),

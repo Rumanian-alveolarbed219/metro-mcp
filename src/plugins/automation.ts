@@ -21,6 +21,7 @@ export const automationPlugin = definePlugin({
         'Poll the component tree until an element matching the given testID or accessibilityLabel appears. ' +
         'Returns element info on success. Use after tap_element, navigate(), or any action that triggers ' +
         'async screen transitions or data loading — instead of immediately calling the next tool.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         selector: z.string().describe('testID or accessibilityLabel to wait for'),
         timeout: z.number().int().min(100).max(60000).default(10000)
@@ -28,7 +29,7 @@ export const automationPlugin = definePlugin({
         pollInterval: z.number().int().min(100).max(5000).default(500)
           .describe('How often to check in milliseconds (default 500)'),
       }),
-      handler: async ({ selector, timeout, pollInterval }) => {
+      handler: async ({ selector, timeout, pollInterval }, { sendProgress }) => {
         const start = Date.now();
         while (Date.now() - start < timeout) {
           try {
@@ -42,6 +43,7 @@ export const automationPlugin = definePlugin({
           } catch {
             // CDP may not be ready yet — keep polling
           }
+          await sendProgress?.(Date.now() - start, timeout, `Waiting for "${selector}"…`);
           await new Promise<void>((r) => setTimeout(r, pollInterval));
         }
         throw new Error(
@@ -56,6 +58,7 @@ export const automationPlugin = definePlugin({
         'Poll a JavaScript expression in the app until it returns a truthy value, then return that value. ' +
         'Useful for waiting on state changes, loading flags, API responses, or any async condition. ' +
         'Example: wait for globalThis.myStore?.isLoaded === true.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         expression: z.string()
           .describe('JS expression to evaluate; polling stops when it returns truthy'),
@@ -64,7 +67,7 @@ export const automationPlugin = definePlugin({
         pollInterval: z.number().int().min(100).max(5000).default(500)
           .describe('How often to check in milliseconds (default 500)'),
       }),
-      handler: async ({ expression, timeout, pollInterval }) => {
+      handler: async ({ expression, timeout, pollInterval }, { sendProgress }) => {
         const start = Date.now();
         while (Date.now() - start < timeout) {
           try {
@@ -75,6 +78,7 @@ export const automationPlugin = definePlugin({
           } catch {
             // keep polling
           }
+          await sendProgress?.(Date.now() - start, timeout, 'Waiting for condition…');
           await new Promise<void>((r) => setTimeout(r, pollInterval));
         }
         throw new Error(
@@ -88,13 +92,14 @@ export const automationPlugin = definePlugin({
         'Poll the active navigation route until it matches the expected route name, then return. ' +
         'Requires the navigation plugin to be set up (get_current_route must work). ' +
         'Use after tap_element on a link or after dispatching a navigate() action.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         routeName: z.string()
           .describe('Expected route name to wait for (e.g. "HomeScreen", "ProfileTab")'),
         timeout: z.number().int().min(100).max(60000).default(10000)
           .describe('Maximum wait time in milliseconds (default 10000)'),
       }),
-      handler: async ({ routeName, timeout }) => {
+      handler: async ({ routeName, timeout }, { sendProgress }) => {
         const start = Date.now();
         const pollInterval = 300;
         while (Date.now() - start < timeout) {
@@ -106,6 +111,7 @@ export const automationPlugin = definePlugin({
           } catch {
             // keep polling
           }
+          await sendProgress?.(Date.now() - start, timeout, `Waiting for route "${routeName}"…`);
           await new Promise<void>((r) => setTimeout(r, pollInterval));
         }
         throw new Error(

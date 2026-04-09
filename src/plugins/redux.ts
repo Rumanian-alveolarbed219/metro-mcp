@@ -10,6 +10,7 @@ export const reduxPlugin = definePlugin({
     ctx.registerTool('get_redux_state', {
       description:
         'Get the current Redux state tree or a specific slice. Works without client SDK if Redux DevTools extension is present or store is exposed globally.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         path: z.string().optional().describe('Dot-separated path to a state slice (e.g., "user.profile")'),
         compact: z.boolean().default(false).describe('Return compact format'),
@@ -62,6 +63,7 @@ export const reduxPlugin = definePlugin({
 
     ctx.registerTool('dispatch_redux_action', {
       description: 'Dispatch a Redux action to the store.',
+      annotations: { openWorldHint: false },
       parameters: z.object({
         type: z.string().describe('Action type'),
         payload: z.unknown().optional().describe('Action payload'),
@@ -86,6 +88,7 @@ export const reduxPlugin = definePlugin({
 
     ctx.registerTool('get_redux_actions', {
       description: 'Get recent Redux actions (requires metro-mcp client SDK for real-time tracking).',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         limit: z.number().default(20).describe('Maximum actions to return'),
       }),

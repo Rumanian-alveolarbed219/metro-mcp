@@ -10,6 +10,7 @@ export const sourcePlugin = definePlugin({
     ctx.registerTool('symbolicate', {
       description:
         'Symbolicate a stack trace using Metro bundler source maps. Converts minified/bundled locations back to original source files.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         stack: z
           .array(

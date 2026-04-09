@@ -10,6 +10,7 @@ export const storagePlugin = definePlugin({
   async setup(ctx) {
     ctx.registerTool('get_storage_keys', {
       description: 'List all AsyncStorage keys in the React Native app.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({}),
       handler: async () => {
         const result = await ctx.evalInApp(`
@@ -31,6 +32,7 @@ export const storagePlugin = definePlugin({
 
     ctx.registerTool('get_storage_item', {
       description: 'Read a specific AsyncStorage key value.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         key: z.string().describe('AsyncStorage key to read'),
       }),
@@ -56,6 +58,7 @@ export const storagePlugin = definePlugin({
 
     ctx.registerTool('get_all_storage', {
       description: 'Dump all AsyncStorage key-value pairs.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         maxLength: z.number().default(500).describe('Max length for each value'),
       }),

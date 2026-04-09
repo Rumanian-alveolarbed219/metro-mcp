@@ -84,6 +84,7 @@ export const statuslinePlugin = definePlugin({
         'Does not modify settings.json — tell the user to add it to their status line themselves ' +
         '(e.g. ask Claude: "/statusline add the script at ~/.claude/metro-mcp-statusline.sh"). ' +
         'Only works with Claude Code.',
+      annotations: { idempotentHint: true },
       parameters: z.object({}),
       handler: async () => {
         mkdirSync(CLAUDE_DIR, { recursive: true });
