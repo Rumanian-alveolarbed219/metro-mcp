@@ -54,6 +54,23 @@ export function formatTimestamp(ts: number): string {
 }
 
 /**
+ * Format a timestamp to HH:MM:SS.mmm (time only, no date).
+ * More compact than ISO 8601 for in-session debugging output.
+ */
+export function formatTime(ts: number): string {
+  const d = new Date(ts);
+  return (
+    String(d.getHours()).padStart(2, '0') +
+    ':' +
+    String(d.getMinutes()).padStart(2, '0') +
+    ':' +
+    String(d.getSeconds()).padStart(2, '0') +
+    '.' +
+    String(d.getMilliseconds()).padStart(3, '0')
+  );
+}
+
+/**
  * Escape a string for safe embedding inside a JS single-quoted string literal.
  */
 export function escapeJsString(str: string): string {

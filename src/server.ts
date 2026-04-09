@@ -232,7 +232,7 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
 
               try {
                 const result = await toolConfig.handler(args as z.infer<T>, { sendProgress });
-                const content = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+                const content = typeof result === 'string' ? result : JSON.stringify(result);
                 return { content: [{ type: 'text' as const, text: content }] };
               } catch (err) {
                 const message = err instanceof Error ? err.message : String(err);

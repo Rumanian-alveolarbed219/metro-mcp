@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { definePlugin } from '../plugin.js';
 import { CircularBuffer, DeviceBufferManager } from '../utils/buffer.js';
-import { formatTimestamp } from '../utils/format.js';
+import { formatTime } from '../utils/format.js';
 import { extractCDPExceptionMessage } from '../utils/cdp.js';
 
 interface ErrorEntry {
@@ -134,26 +134,31 @@ export const errorsPlugin = definePlugin({
     }
 
     ctx.registerTool('get_errors', {
-      description: 'Get recent uncaught exceptions and errors from the React Native app.',
+      description: 'Get recent uncaught exceptions from the React Native app.',
       annotations: { readOnlyHint: true },
       parameters: z.object({
         limit: z.number().default(20).describe('Maximum number of errors to return'),
-        summary: z.boolean().default(false).describe('Return summary with counts'),
+        since: z.number().optional().describe('Only return entries after this Unix timestamp (ms). Pass the timestamp of the last seen entry to fetch only new ones.'),
+        summary: z.boolean().default(false).describe('Return a one-line summary with counts'),
         device: z.string().optional().describe('Device key or "all" for aggregated errors. Defaults to current device.'),
       }),
-      handler: async ({ limit, summary, device }) => {
-        const errors = getErrors(device);
+      handler: async ({ limit, since, summary, device }) => {
+        let errors = getErrors(device);
+        if (since !== undefined) errors = errors.filter((e) => e.timestamp > since);
         if (summary) {
           return ctx.format.summarize(
             errors.map((e) => e.message),
             5
           );
         }
-        return errors.slice(-limit).map((e) => ({
-          time: formatTimestamp(e.timestamp),
-          message: e.message,
-          stack: e.symbolicatedStack || e.stack,
-        }));
+        const result = errors.slice(-limit);
+        if (result.length === 0) return '(no errors)';
+        return result.map((e) => {
+          const stack = e.symbolicatedStack || e.stack;
+          return stack
+            ? `${formatTime(e.timestamp)} ${e.message}\n${stack}`
+            : `${formatTime(e.timestamp)} ${e.message}`;
+        }).join('\n\n');
       },
     });
 
@@ -182,31 +187,21 @@ export const errorsPlugin = definePlugin({
       handler: async ({ limit }) => {
         const errs = bundleErrors.getAll().slice(-limit);
         if (errs.length === 0) return 'No bundle errors detected.';
-        return errs.map((e) => ({
-          time: formatTimestamp(e.timestamp),
-          type: e.type,
-          message: ctx.format.truncate(e.message, 500),
-          file: e.file,
-          line: e.lineNumber,
-          column: e.column,
-        }));
+        return errs.map((e) => {
+          const location = e.file ? ` ${e.file}${e.lineNumber ? `:${e.lineNumber}` : ''}${e.column ? `:${e.column}` : ''}` : '';
+          return `${formatTime(e.timestamp)} [${e.type}]${location} ${ctx.format.truncate(e.message, 500)}`;
+        }).join('\n\n');
       },
     });
 
     ctx.registerResource('metro://errors', {
       name: 'Errors',
       description: 'Recent uncaught exceptions from the React Native app',
+      mimeType: 'text/plain',
       handler: async () => {
-        const all = getErrors();
-        const errors = all.slice(-10);
-        return JSON.stringify(
-          errors.map((e) => ({
-            time: formatTimestamp(e.timestamp),
-            message: e.message,
-          })),
-          null,
-          2
-        );
+        const errors = getErrors().slice(-10);
+        if (errors.length === 0) return '(no errors)';
+        return errors.map((e) => `${formatTime(e.timestamp)} ${e.message}`).join('\n');
       },
     });
   },
