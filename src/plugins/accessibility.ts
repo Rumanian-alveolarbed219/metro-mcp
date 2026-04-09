@@ -141,6 +141,7 @@ export const accessibilityPlugin = definePlugin({
     ctx.registerTool('audit_accessibility', {
       description:
         'Run a full accessibility audit on the current screen. Checks for missing labels, roles, testIDs, alt text, and more.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         severity: z.enum(['all', 'error', 'warning', 'info']).default('all').describe('Filter by severity level'),
       }),
@@ -164,6 +165,7 @@ export const accessibilityPlugin = definePlugin({
 
     ctx.registerTool('check_element_accessibility', {
       description: 'Check accessibility properties of a specific component by name or testID.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         name: z.string().optional().describe('Component name to check'),
         testID: z.string().optional().describe('testID to find'),
@@ -217,6 +219,7 @@ export const accessibilityPlugin = definePlugin({
 
     ctx.registerTool('get_accessibility_summary', {
       description: 'Quick overview: counts of elements with and without proper accessibility props.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({}),
       handler: async () => {
         const expr = `

@@ -10,6 +10,7 @@ export const devicePlugin = definePlugin({
   async setup(ctx) {
     ctx.registerTool('list_devices', {
       description: 'List connected devices and debuggable targets from Metro bundler.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         rescan: z.boolean().default(false).describe('Rescan all Metro ports'),
       }),
@@ -46,6 +47,7 @@ export const devicePlugin = definePlugin({
 
     ctx.registerTool('get_app_info', {
       description: 'Get information about the connected React Native app (bundle URL, platform, device name).',
+      annotations: { readOnlyHint: true },
       parameters: z.object({}),
       handler: async () => {
         if (!ctx.cdp.isConnected) {
@@ -68,6 +70,7 @@ export const devicePlugin = definePlugin({
 
     ctx.registerTool('get_connection_status', {
       description: 'Check the connection status to Metro bundler.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({}),
       handler: async () => {
         const config = ctx.config as Record<string, Record<string, unknown>>;
@@ -86,6 +89,7 @@ export const devicePlugin = definePlugin({
 
     ctx.registerTool('reload_app', {
       description: 'Reload the React Native app. Tries the Metro HTTP endpoint first, falls back to CDP evaluation.',
+      annotations: { idempotentHint: true },
       parameters: z.object({}),
       handler: async () => {
         // Try Metro HTTP reload endpoint first (most reliable)

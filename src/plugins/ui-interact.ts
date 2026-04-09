@@ -48,6 +48,7 @@ export const uiInteractPlugin = definePlugin({
     ctx.registerTool('list_elements', {
       description:
         'Get interactive elements from the current screen via the React component tree. Returns labels, testIDs, and roles — use label or testID with tap_element.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         interactiveOnly: z.boolean().default(false).describe('Return only elements with onPress handlers'),
       }),
@@ -122,6 +123,7 @@ export const uiInteractPlugin = definePlugin({
     ctx.registerTool('tap_element', {
       description:
         'Tap an element by label, testID, or coordinates. Uses CDP fiber tree, then simctl/adb, then IDB.',
+      annotations: { destructiveHint: false },
       parameters: z.object({
         label: z.string().optional().describe('Accessibility label, aria-label, or testID to tap'),
         x: z.number().optional().describe('X coordinate'),
@@ -211,6 +213,7 @@ export const uiInteractPlugin = definePlugin({
     ctx.registerTool('type_text', {
       description:
         'Type text into an input field. Targets a specific input by testID/label, or the first visible TextInput. Uses CDP fiber tree, then adb/IDB.',
+      annotations: { destructiveHint: false },
       parameters: z.object({
         text: z.string().describe('Text to type'),
         testID: z
@@ -289,6 +292,7 @@ export const uiInteractPlugin = definePlugin({
     ctx.registerTool('long_press', {
       description:
         'Long press an element by label/testID, or at coordinates. Uses CDP fiber tree, then adb/IDB.',
+      annotations: { destructiveHint: false },
       parameters: z.object({
         label: z.string().optional().describe('Accessibility label or testID of the element to long press'),
         x: z.number().optional().describe('X coordinate'),
@@ -335,6 +339,7 @@ export const uiInteractPlugin = definePlugin({
     ctx.registerTool('swipe', {
       description:
         'Swipe or scroll in a direction. Tries CDP ScrollView scrollTo, then adb/IDB.',
+      annotations: { destructiveHint: false },
       parameters: z.object({
         direction: z.enum(['up', 'down', 'left', 'right']).describe('Swipe direction'),
         platform: z.enum(['ios', 'android', 'auto']).default('auto'),
@@ -425,6 +430,7 @@ export const uiInteractPlugin = definePlugin({
 
     ctx.registerTool('press_button', {
       description: 'Press a device button (HOME, BACK, VOLUME_UP, etc.).',
+      annotations: { destructiveHint: false },
       parameters: z.object({
         button: z
           .enum(['HOME', 'BACK', 'VOLUME_UP', 'VOLUME_DOWN', 'POWER', 'ENTER', 'DELETE'])

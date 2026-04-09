@@ -21,6 +21,7 @@ export const deeplinkPlugin = definePlugin({
 
     ctx.registerTool('open_deeplink', {
       description: 'Open a URL or deep link on the connected iOS simulator or Android device.',
+      annotations: { openWorldHint: true },
       parameters: z.object({
         url: z.string().describe('URL or deep link to open (e.g., "myapp://screen/details" or "https://example.com/path")'),
         platform: z.enum(['ios', 'android', 'auto']).default('auto'),
@@ -42,6 +43,7 @@ export const deeplinkPlugin = definePlugin({
 
     ctx.registerTool('list_url_schemes', {
       description: 'List URL schemes registered by the app (attempts to detect from the running app).',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         bundleId: z.string().optional().describe('Bundle ID to check (auto-detected if not provided)'),
       }),

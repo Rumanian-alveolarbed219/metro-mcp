@@ -10,6 +10,7 @@ export const evaluatePlugin = definePlugin({
     ctx.registerTool('evaluate_js', {
       description:
         'Execute a JavaScript expression in the running React Native app and return the result. Use this for inspecting variables, calling functions, or querying app state.',
+      annotations: { destructiveHint: true },
       parameters: z.object({
         expression: z.string().describe('JavaScript expression to evaluate'),
         awaitPromise: z.boolean().default(true).describe('Wait for promise to resolve if expression returns a promise'),

@@ -13,6 +13,7 @@ export const inspectPointPlugin = definePlugin({
         'Inspect the React component rendered at specific screen coordinates. ' +
         'Walks the React fiber tree to find the component whose layout contains the given point. ' +
         'Experimental: layout measurement varies between Old and New Architecture.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         x: z.number().describe('X coordinate (points/dp)'),
         y: z.number().describe('Y coordinate (points/dp)'),

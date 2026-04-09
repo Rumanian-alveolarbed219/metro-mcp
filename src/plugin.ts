@@ -32,10 +32,29 @@ export interface ComponentNode {
 
 // ── Tool / Resource / Prompt Registration ──
 
+export interface ToolAnnotations {
+  /** Human-readable name for display in client UIs */
+  title?: string;
+  /** If true, the tool does not modify any state (safe to auto-approve) */
+  readOnlyHint?: boolean;
+  /** If true, the tool may perform irreversible or destructive actions */
+  destructiveHint?: boolean;
+  /** If true, calling with identical arguments multiple times has no additional effect */
+  idempotentHint?: boolean;
+  /** If true, the tool may interact with external systems beyond the local environment */
+  openWorldHint?: boolean;
+}
+
+export interface ToolHandlerContext {
+  /** Send a progress notification to the client (only if client provided a progressToken) */
+  sendProgress?: (progress: number, total: number, message?: string) => Promise<void>;
+}
+
 export interface ToolConfig<T extends z.ZodType = z.ZodType> {
   description: string;
   parameters: T;
-  handler: (args: z.infer<T>) => Promise<unknown>;
+  annotations?: ToolAnnotations;
+  handler: (args: z.infer<T>, ctx: ToolHandlerContext) => Promise<unknown>;
 }
 
 export interface ResourceConfig {
@@ -43,6 +62,10 @@ export interface ResourceConfig {
   description: string;
   mimeType?: string;
   handler: () => Promise<string>;
+  /** Called when a client subscribes to this resource URI */
+  onSubscribe?: (uri: string) => void;
+  /** Called when a client unsubscribes from this resource URI */
+  onUnsubscribe?: (uri: string) => void;
 }
 
 export interface PromptConfig {
@@ -101,6 +124,8 @@ export interface PluginContext {
   getActiveDeviceKey(): string | null;
   /** Returns a human-readable name for the active device, or null if not connected. */
   getActiveDeviceName(): string | null;
+  /** Notify subscribed clients that a resource's content has changed */
+  notifyResourceUpdated(uri: string): void;
 }
 
 // ── Logger ──

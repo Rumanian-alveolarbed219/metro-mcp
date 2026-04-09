@@ -23,6 +23,7 @@ export const simulatorPlugin = definePlugin({
 
     ctx.registerTool('take_screenshot', {
       description: 'Capture a screenshot from the connected iOS simulator or Android device.',
+      annotations: { readOnlyHint: true, openWorldHint: true },
       parameters: z.object({
         platform: z.enum(['ios', 'android', 'auto']).default('auto').describe('Target platform'),
       }),
@@ -56,6 +57,7 @@ export const simulatorPlugin = definePlugin({
 
     ctx.registerTool('list_simulators', {
       description: 'List available iOS simulators or Android emulators.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         platform: z.enum(['ios', 'android', 'both']).default('both'),
         bootedOnly: z.boolean().default(false).describe('Show only booted/running devices'),
@@ -111,6 +113,7 @@ export const simulatorPlugin = definePlugin({
 
     ctx.registerTool('install_certificate', {
       description: 'Install a root certificate on the iOS simulator or Android device.',
+      annotations: { destructiveHint: true, openWorldHint: true },
       parameters: z.object({
         certPath: z.string().describe('Path to the certificate file'),
         platform: z.enum(['ios', 'android', 'auto']).default('auto'),
@@ -131,6 +134,7 @@ export const simulatorPlugin = definePlugin({
 
     ctx.registerTool('get_native_logs', {
       description: 'Get native platform logs from iOS simulator (syslog) or Android device (logcat).',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         platform: z.enum(['ios', 'android', 'auto']).default('auto'),
         filter: z.string().optional().describe('Filter string (process name for iOS, tag for Android)'),
@@ -164,6 +168,7 @@ export const simulatorPlugin = definePlugin({
 
     ctx.registerTool('app_lifecycle', {
       description: 'Launch, terminate, install, or uninstall an app on the simulator/emulator.',
+      annotations: { destructiveHint: true },
       parameters: z.object({
         action: z.enum(['launch', 'terminate', 'install', 'uninstall']).describe('Action to perform'),
         bundleId: z.string().describe('App bundle identifier (e.g., com.example.app)'),
@@ -199,6 +204,7 @@ export const simulatorPlugin = definePlugin({
 
     ctx.registerTool('get_screen_orientation', {
       description: 'Get the current screen orientation of the device.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         platform: z.enum(['ios', 'android', 'auto']).default('auto'),
       }),

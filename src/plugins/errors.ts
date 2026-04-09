@@ -123,7 +123,10 @@ export const errorsPlugin = definePlugin({
       }
 
       const key = ctx.getActiveDeviceKey();
-      if (key) buffers.getOrCreate(key).push(entry);
+      if (key) {
+        buffers.getOrCreate(key).push(entry);
+        ctx.notifyResourceUpdated('metro://errors');
+      }
     });
 
     function getErrors(device?: string): ErrorEntry[] {
@@ -132,6 +135,7 @@ export const errorsPlugin = definePlugin({
 
     ctx.registerTool('get_errors', {
       description: 'Get recent uncaught exceptions and errors from the React Native app.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         limit: z.number().default(20).describe('Maximum number of errors to return'),
         summary: z.boolean().default(false).describe('Return summary with counts'),
@@ -155,6 +159,7 @@ export const errorsPlugin = definePlugin({
 
     ctx.registerTool('clear_errors', {
       description: 'Clear the error buffer.',
+      annotations: { destructiveHint: true, idempotentHint: true },
       parameters: z.object({
         device: z.string().optional().describe('Device key to clear, or omit for current device. Use "all" to clear all.'),
       }),
@@ -170,6 +175,7 @@ export const errorsPlugin = definePlugin({
 
     ctx.registerTool('get_bundle_errors', {
       description: 'Get recent Metro compilation/transform errors.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         limit: z.number().default(20).describe('Maximum errors to return'),
       }),

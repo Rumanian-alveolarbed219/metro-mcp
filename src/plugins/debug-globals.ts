@@ -19,6 +19,7 @@ export const debugGlobalsPlugin = definePlugin({
     ctx.registerTool('list_debug_globals', {
       description:
         'Auto-discover well-known global debugging objects (Redux stores, Apollo Client, Expo Router, React DevTools hook, etc.) available in the app runtime.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         detailed: z.boolean().default(false).describe('Include top-level keys for each discovered global'),
       }),

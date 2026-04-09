@@ -140,6 +140,7 @@ export const consolePlugin = definePlugin({
           : undefined,
       };
       buffers.getOrCreate(key).push(entry);
+      ctx.notifyResourceUpdated('metro://logs');
 
       // ObjectIds are short-lived, so resolve promptly after the log event.
       const hasResolvable = args.some(
@@ -181,6 +182,7 @@ export const consolePlugin = definePlugin({
 
     ctx.registerTool('get_console_logs', {
       description: 'Get recent console output from the React Native app. Filter by log level and search text.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         level: z.enum(['log', 'warn', 'error', 'info', 'debug']).optional().describe('Filter by log level'),
         search: z.string().optional().describe('Search text to filter logs'),
@@ -216,6 +218,7 @@ export const consolePlugin = definePlugin({
 
     ctx.registerTool('clear_console_logs', {
       description: 'Clear the console log buffer.',
+      annotations: { destructiveHint: true, idempotentHint: true },
       parameters: z.object({
         device: z.string().optional().describe('Device key to clear, or omit for current device. Use "all" to clear all.'),
       }),

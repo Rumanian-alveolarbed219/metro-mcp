@@ -307,6 +307,7 @@ export const testRecorderPlugin = definePlugin({
         'with no changes to your app code. Works with ScrollView, FlatList, SectionList, ' +
         'FlashList, and other scroll containers. ' +
         'Call stop_test_recording when done, then generate_test_from_recording to get the test.',
+      annotations: { destructiveHint: false, idempotentHint: false },
       parameters: z.object({}),
       handler: async () => {
         storedEvents = null;
@@ -341,6 +342,7 @@ export const testRecorderPlugin = definePlugin({
         'Stop the active recording, retrieve all captured events, and store them for test generation. ' +
         'Returns a summary of what was recorded. ' +
         'Call generate_test_from_recording next to produce Appium, Maestro, or Detox test code.',
+      annotations: { readOnlyHint: false, idempotentHint: false },
       parameters: z.object({}),
       handler: async () => {
         // Cleanup injection
@@ -381,6 +383,7 @@ export const testRecorderPlugin = definePlugin({
         'Convert the most recent recording into a test file. ' +
         'Supports three formats: appium (WebdriverIO + Jest), maestro (YAML), and detox (Jest). ' +
         'Call stop_test_recording first.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         format: z.enum(['appium', 'maestro', 'detox']).describe('Output format'),
         testName: z.string().optional().describe('Name for the test / describe block'),
@@ -418,6 +421,7 @@ export const testRecorderPlugin = definePlugin({
     ctx.registerTool('generate_wdio_config', {
       description:
         'Generate a minimal but runnable wdio.conf.ts for Appium + React Native testing, along with the npm install command.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         platform: z.enum(['ios', 'android', 'both']).default('ios'),
         bundleId: z.string().optional().describe('iOS bundle ID or Android app package'),
@@ -510,6 +514,7 @@ export const testRecorderPlugin = definePlugin({
         'Add a human-readable annotation (comment marker) to the current recording. ' +
         'Useful for labelling major flow checkpoints like "reached checkout", "error appeared here", ' +
         '"navigated to payment". Annotations appear as code comments in generated tests.',
+      annotations: { destructiveHint: false },
       parameters: z.object({
         note: z.string().describe('Annotation text to embed in the recording'),
       }),
@@ -536,6 +541,7 @@ export const testRecorderPlugin = definePlugin({
         'Save the current recording events to disk as JSON so they can be reloaded later. ' +
         'Useful for regenerating the same flow in a different test format without re-recording. ' +
         'Files are saved to ~/.metro-mcp/recordings/<filename>.json.',
+      annotations: { destructiveHint: false, idempotentHint: true },
       parameters: z.object({
         filename: z.string().describe('Name for the saved recording (without .json extension)'),
       }),
@@ -560,6 +566,7 @@ export const testRecorderPlugin = definePlugin({
         'Load a previously saved recording from disk and make it available for test generation. ' +
         'After loading, call generate_test_from_recording with any format to regenerate the test. ' +
         'Use list_test_recordings to see available files.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({
         filename: z.string().describe('Name of the saved recording (without .json extension)'),
       }),
@@ -593,6 +600,7 @@ export const testRecorderPlugin = definePlugin({
       description:
         'List all previously saved test recordings in ~/.metro-mcp/recordings/. ' +
         'Returns filenames and sizes. Use load_test_recording to load one for test generation.',
+      annotations: { readOnlyHint: true },
       parameters: z.object({}),
       handler: async () => {
         let entries: { name: string }[];

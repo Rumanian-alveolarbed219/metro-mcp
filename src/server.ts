@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import fs from 'fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { SubscribeRequestSchema, UnsubscribeRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
 const execAsync = promisify(exec);
 import { z } from 'zod';
@@ -91,6 +92,29 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
   const eventsClient = new MetroEventsClient();
   const formatUtils = createFormatUtils();
 
+  // Track URIs that clients have subscribed to for live update notifications
+  const subscribedResources = new Set<string>();
+
+  // Wire up resource subscription handlers so clients can receive push notifications
+  // when resource content changes (e.g. new logs, errors, network requests).
+  mcpServer.server.setRequestHandler(SubscribeRequestSchema, async (req) => {
+    subscribedResources.add(req.params.uri);
+    logger.debug(`Client subscribed to resource: ${req.params.uri}`);
+    return {};
+  });
+
+  mcpServer.server.setRequestHandler(UnsubscribeRequestSchema, async (req) => {
+    subscribedResources.delete(req.params.uri);
+    logger.debug(`Client unsubscribed from resource: ${req.params.uri}`);
+    return {};
+  });
+
+  function notifyResourceUpdated(uri: string): void {
+    if (subscribedResources.has(uri)) {
+      mcpServer.server.sendResourceUpdated({ uri }).catch(() => {});
+    }
+  }
+
   // Active device tracking — used by plugins to key per-device buffers.
   let activeDeviceKey: string | null = null;
   let activeDeviceName: string | null = null;
@@ -137,15 +161,31 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
       events: eventsClient,
       registerTool: <T extends z.ZodType>(name: string, toolConfig: ToolConfig<T>) => {
         try {
-          mcpServer.tool(
+          const inputSchema = toolConfig.parameters instanceof z.ZodObject
+            ? (toolConfig.parameters as z.ZodObject<z.ZodRawShape>).shape
+            : { input: toolConfig.parameters };
+
+          mcpServer.registerTool(
             name,
-            toolConfig.description,
-            toolConfig.parameters instanceof z.ZodObject
-              ? (toolConfig.parameters as z.ZodObject<z.ZodRawShape>).shape
-              : { input: toolConfig.parameters },
-            async (args) => {
+            {
+              description: toolConfig.description,
+              inputSchema,
+              annotations: toolConfig.annotations,
+            },
+            async (args, extra) => {
+              // Build a sendProgress helper if the client sent a progressToken
+              const progressToken = extra._meta?.progressToken;
+              const sendProgress = progressToken !== undefined
+                ? async (progress: number, total: number, message?: string) => {
+                    await extra.sendNotification({
+                      method: 'notifications/progress',
+                      params: { progressToken, progress, total, ...(message ? { message } : {}) },
+                    } as Parameters<typeof extra.sendNotification>[0]);
+                  }
+                : undefined;
+
               try {
-                const result = await toolConfig.handler(args as z.infer<T>);
+                const result = await toolConfig.handler(args as z.infer<T>, { sendProgress });
                 const content = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
                 return { content: [{ type: 'text' as const, text: content }] };
               } catch (err) {
@@ -210,6 +250,9 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
               // A reconnect is already in flight — wait for it rather than starting another
               await waitForReconnect();
             } else {
+              // Reset the attempt counter so the background scheduler can resume
+              // after this tool-triggered reconnect, rather than staying capped out.
+              reconnectAttempts = 0;
               const connected = await cdpSession.waitForConnection();
               if (!connected) await connectToMetro();
             }
@@ -239,6 +282,7 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
             if (isReconnecting) {
               await waitForReconnect();
             } else {
+              reconnectAttempts = 0;
               await connectToMetro();
             }
             return await tryEval();
@@ -262,6 +306,7 @@ export async function startServer(config: Required<MetroMCPConfig>): Promise<voi
       format: formatUtils,
       getActiveDeviceKey: () => activeDeviceKey,
       getActiveDeviceName: () => activeDeviceName,
+      notifyResourceUpdated,
     };
   }
 
