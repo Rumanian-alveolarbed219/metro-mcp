@@ -4,6 +4,10 @@ import { definePlugin } from '../plugin.js';
 const MAX_BYTES_DEFAULT = 50 * 1024;  // 50 KB
 const MAX_BYTES_CAP     = 1024 * 1024; // 1 MB
 
+// Matches one ls -la entry line on both macOS and Android busybox.
+const LS_LINE_RE =
+  /^([dlrwxbcpst\-]{10}[+@.]?)\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\w+\s+\d+\s+[\d:]+)/;
+
 export const filesystemPlugin = definePlugin({
   name: 'filesystem',
 
@@ -12,12 +16,15 @@ export const filesystemPlugin = definePlugin({
     '(Documents, Library/Caches, temp). Supports iOS Simulator and Android.',
 
   async setup(ctx) {
-    // ── Helpers ──────────────────────────────────────────────────────────────
+    // Cache the detected platform for the lifetime of this plugin session so
+    // tools with platform:'auto' don't re-run xcrun/adb on every call.
+    let detectedPlatform: 'ios' | 'android' | null | undefined;
 
     async function detectPlatform(): Promise<'ios' | 'android' | null> {
+      if (detectedPlatform !== undefined) return detectedPlatform;
       try {
         const out = await ctx.exec('xcrun simctl list booted 2>/dev/null');
-        if (out.includes('Booted')) return 'ios';
+        if (out.includes('Booted')) return (detectedPlatform = 'ios');
       } catch {}
       try {
         const out = await ctx.exec('adb devices 2>/dev/null');
@@ -26,19 +33,17 @@ export const filesystemPlugin = definePlugin({
           .split('\n')
           .slice(1)
           .filter((l) => l.trim() && !l.startsWith('*'));
-        if (connected.length > 0) return 'android';
+        if (connected.length > 0) return (detectedPlatform = 'android');
       } catch {}
-      return null;
+      return (detectedPlatform = null);
     }
 
-    /** Throw if the path contains ".." segments to prevent directory traversal. */
     function assertSafePath(p: string): void {
       if (p.split('/').includes('..')) {
         throw new Error('Directory traversal not allowed: ".." segments are forbidden');
       }
     }
 
-    /** Return the iOS Simulator data-container root for the given bundle ID. */
     async function getIosContainer(bundleId: string): Promise<string> {
       const out = await ctx.exec(
         `xcrun simctl get_app_container booted "${bundleId}" data`
@@ -54,16 +59,12 @@ export const filesystemPlugin = definePlugin({
       modified: string;
     }
 
-    /**
-     * Parse `ls -la` output (macOS or Android busybox) into structured entries.
-     * parentPath is the directory that was listed.
-     */
+    // Parse `ls -la` output (macOS or Android busybox) into structured entries.
     function parseLsOutput(output: string, parentPath: string): FileEntry[] {
       const base = parentPath.replace(/\/$/, '');
       const entries: FileEntry[] = [];
       for (const line of output.trim().split('\n')) {
         if (!line.trim() || line.startsWith('total ')) continue;
-        // permissions  links  owner  group  size  date(3 tokens)  name
         const match = line.match(
           /^([dlrwxbcpst\-]{10}[+@.]?)\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\w+\s+\d+\s+[\d:]+)\s+(.+)$/
         );
@@ -81,19 +82,12 @@ export const filesystemPlugin = definePlugin({
       return entries;
     }
 
-    /**
-     * Parse a single `ls -lad` line for get_file_info.
-     * Returns structured metadata for the item at `itemPath`.
-     */
-    function parseFileInfoLine(
-      output: string,
-      itemPath: string
-    ): FileEntry | null {
+    // Parse a single `ls -lad` line; uses itemPath for name/path since lad
+    // shows the full path in the name column rather than just the basename.
+    function parseFileInfoLine(output: string, itemPath: string): FileEntry | null {
       for (const line of output.trim().split('\n')) {
         if (!line.trim() || line.startsWith('total ')) continue;
-        const match = line.match(
-          /^([dlrwxbcpst\-]{10}[+@.]?)\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\w+\s+\d+\s+[\d:]+)/
-        );
+        const match = line.match(LS_LINE_RE);
         if (!match) continue;
         const [, perms, sizeStr, modified] = match;
         const name = itemPath.split('/').filter(Boolean).pop() ?? itemPath;
@@ -108,7 +102,11 @@ export const filesystemPlugin = definePlugin({
       return null;
     }
 
-    // ── get_app_directories ───────────────────────────────────────────────────
+    // Prefix for Android `adb shell` commands that need app-private access.
+    // Package names are alphanumeric+dots, so no quoting is required.
+    function runAs(bundleId?: string): string {
+      return bundleId ? `run-as ${bundleId} ` : '';
+    }
 
     ctx.registerTool('get_app_directories', {
       description:
@@ -151,7 +149,7 @@ export const filesystemPlugin = definePlugin({
         if (bundleId) {
           try {
             const homeOut = await ctx.exec(
-              `adb shell run-as "${bundleId}" sh -c 'echo $HOME' 2>/dev/null`
+              `adb shell ${runAs(bundleId)}sh -c 'echo $HOME' 2>/dev/null`
             );
             const home = homeOut.trim() || `/data/data/${bundleId}`;
             return {
@@ -161,9 +159,7 @@ export const filesystemPlugin = definePlugin({
               cache:     `${home}/cache`,
               temp:      `${home}/cache`,
             };
-          } catch {
-            // fall through to evalInApp
-          }
+          } catch {}
         }
 
         try {
@@ -191,8 +187,6 @@ export const filesystemPlugin = definePlugin({
         }
       },
     });
-
-    // ── list_directory ────────────────────────────────────────────────────────
 
     ctx.registerTool('list_directory', {
       description:
@@ -237,16 +231,10 @@ export const filesystemPlugin = definePlugin({
 
         try {
           const flags = recursive ? '-laR' : '-la';
-          let output: string;
-
-          if (p === 'ios') {
-            output = await ctx.exec(`ls ${flags} "${targetPath}" 2>&1`);
-          } else {
-            const runAs = bundleId ? `run-as "${bundleId}" ` : '';
-            output = await ctx.exec(
-              `adb shell ${runAs}ls ${flags} "${targetPath}" 2>&1`
-            );
-          }
+          const output =
+            p === 'ios'
+              ? await ctx.exec(`ls ${flags} "${targetPath}" 2>&1`)
+              : await ctx.exec(`adb shell ${runAs(bundleId)}ls ${flags} "${targetPath}" 2>&1`);
 
           if (recursive) return { path: targetPath, raw: output };
           return parseLsOutput(output, targetPath);
@@ -257,8 +245,6 @@ export const filesystemPlugin = definePlugin({
         }
       },
     });
-
-    // ── read_file ─────────────────────────────────────────────────────────────
 
     ctx.registerTool('read_file', {
       description:
@@ -291,22 +277,18 @@ export const filesystemPlugin = definePlugin({
           let content: string;
 
           if (p === 'ios') {
-            if (encoding === 'base64') {
-              content = await ctx.exec(`head -c ${limit} "${path}" | base64`);
-            } else {
-              content = await ctx.exec(`head -c ${limit} "${path}"`);
-            }
+            content =
+              encoding === 'base64'
+                ? await ctx.exec(`head -c ${limit} "${path}" | base64`)
+                : await ctx.exec(`head -c ${limit} "${path}"`);
           } else {
-            const runAs = bundleId ? `run-as "${bundleId}" ` : '';
-            if (encoding === 'base64') {
-              content = await ctx.exec(
-                `adb shell "${runAs}sh -c 'dd if=${path} bs=1 count=${limit} 2>/dev/null | base64'"`
-              );
-            } else {
-              content = await ctx.exec(
-                `adb shell ${runAs}dd if="${path}" bs=1 count=${limit} 2>/dev/null`
-              );
-            }
+            // bs=${limit} count=1 reads up to `limit` bytes in a single I/O op,
+            // equivalent to bs=1 count=${limit} but without the per-byte syscall overhead.
+            const ra = runAs(bundleId);
+            content =
+              encoding === 'base64'
+                ? await ctx.exec(`adb shell ${ra}sh -c 'dd if="${path}" bs=${limit} count=1 2>/dev/null | base64'`)
+                : await ctx.exec(`adb shell ${ra}dd if="${path}" bs=${limit} count=1 2>/dev/null`);
           }
 
           return { path, content, encoding, bytesLimitApplied: limit };
@@ -317,8 +299,6 @@ export const filesystemPlugin = definePlugin({
         }
       },
     });
-
-    // ── get_file_info ─────────────────────────────────────────────────────────
 
     ctx.registerTool('get_file_info', {
       description:
@@ -338,20 +318,13 @@ export const filesystemPlugin = definePlugin({
         if (!p) return { error: 'No simulator/emulator detected' };
 
         try {
-          let output: string;
-          if (p === 'ios') {
-            output = await ctx.exec(`ls -lad "${path}" 2>&1`);
-          } else {
-            const runAs = bundleId ? `run-as "${bundleId}" ` : '';
-            output = await ctx.exec(
-              `adb shell ${runAs}ls -lad "${path}" 2>&1`
-            );
-          }
+          const output =
+            p === 'ios'
+              ? await ctx.exec(`ls -lad "${path}" 2>&1`)
+              : await ctx.exec(`adb shell ${runAs(bundleId)}ls -lad "${path}" 2>&1`);
 
           const info = parseFileInfoLine(output, path);
-          if (info) return info;
-          // Fallback: return raw output if parsing failed
-          return { path, raw: output.trim() };
+          return info ?? { path, raw: output.trim() };
         } catch (err) {
           return {
             error: `Failed to get file info: ${err instanceof Error ? err.message : String(err)}`,
@@ -359,8 +332,6 @@ export const filesystemPlugin = definePlugin({
         }
       },
     });
-
-    // ── delete_file ───────────────────────────────────────────────────────────
 
     ctx.registerTool('delete_file', {
       description:
@@ -380,9 +351,7 @@ export const filesystemPlugin = definePlugin({
       }),
       handler: async ({ path, bundleId, platform, confirm }) => {
         if (!confirm) {
-          return {
-            error: 'Deletion not confirmed. Pass confirm: true to proceed.',
-          };
+          return { error: 'Deletion not confirmed. Pass confirm: true to proceed.' };
         }
         assertSafePath(path);
         const p = platform === 'auto' ? await detectPlatform() : platform;
@@ -392,8 +361,7 @@ export const filesystemPlugin = definePlugin({
           if (p === 'ios') {
             await ctx.exec(`rm -f "${path}"`);
           } else {
-            const runAs = bundleId ? `run-as "${bundleId}" ` : '';
-            await ctx.exec(`adb shell ${runAs}rm "${path}"`);
+            await ctx.exec(`adb shell ${runAs(bundleId)}rm "${path}"`);
           }
           return { success: true, deleted: path };
         } catch (err) {
