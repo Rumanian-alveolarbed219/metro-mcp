@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { definePlugin } from '../plugin.js';
 import { DeviceBufferManager } from '../utils/buffer.js';
-import { formatTimestamp, formatBytes } from '../utils/format.js';
+import { formatTime, formatBytes } from '../utils/format.js';
 import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('network');
@@ -163,12 +163,13 @@ export const networkPlugin = definePlugin({
       annotations: { readOnlyHint: true },
       parameters: z.object({
         limit: z.number().default(50).describe('Maximum number of requests to return'),
-        summary: z.boolean().default(false).describe('Return summary with counts'),
-        compact: z.boolean().default(false).describe('Return compact single-line format'),
+        since: z.number().optional().describe('Only return requests after this Unix timestamp (ms). Pass the timestamp of the last seen entry to fetch only new ones.'),
+        summary: z.boolean().default(false).describe('Return a one-line summary with counts'),
         device: z.string().optional().describe('Device key or "all" for aggregated requests. Defaults to current device.'),
       }),
-      handler: async ({ limit, summary, compact: isCompact, device }) => {
-        const requests = getRequests(device);
+      handler: async ({ limit, since, summary, device }) => {
+        let requests = getRequests(device);
+        if (since !== undefined) requests = requests.filter((r) => r.startTime > since);
 
         if (summary) {
           const total = requests.length;
@@ -179,26 +180,15 @@ export const networkPlugin = definePlugin({
           return `${total} requests, ${errors} errors, avg response time: ${Math.round(avgTime)}ms`;
         }
 
-        const result = requests.slice(-limit);
-        if (isCompact) {
-          return result
-            .map((r) => {
-              const duration = r.endTime ? `${r.endTime - r.startTime}ms` : 'pending';
-              const status = r.error ? `ERR: ${r.error}` : `${r.status || '???'}`;
-              return `${r.method} ${r.url} → ${status} (${duration})`;
-            })
-            .join('\n');
-        }
-
-        return result.map((r) => ({
-          method: r.method,
-          url: r.url,
-          status: r.status,
-          duration: r.endTime ? `${r.endTime - r.startTime}ms` : 'pending',
-          size: r.size ? formatBytes(r.size) : undefined,
-          error: r.error,
-          time: formatTimestamp(r.startTime),
-        }));
+        return requests
+          .slice(-limit)
+          .map((r) => {
+            const duration = r.endTime ? `${r.endTime - r.startTime}ms` : 'pending';
+            const status = r.error ? `ERR: ${r.error}` : `${r.status || '???'}`;
+            const size = r.size ? `, ${formatBytes(r.size)}` : '';
+            return `${formatTime(r.startTime)} ${r.method} ${r.url} → ${status} (${duration}${size})`;
+          })
+          .join('\n');
       },
     });
 
@@ -220,10 +210,7 @@ export const networkPlugin = definePlugin({
     });
 
     ctx.registerTool('get_response_body', {
-      description:
-        'Get the response body for a specific network request. ' +
-        'Bodies are eagerly cached when small enough, so they survive reconnections. ' +
-        'Larger bodies are fetched on demand and only available in the current CDP session.',
+      description: 'Get response body for a network request (cached if small; requires active session if large).',
       annotations: { readOnlyHint: true },
       parameters: z.object({
         url: z.string().describe('URL or partial URL to find the request'),
@@ -274,9 +261,10 @@ export const networkPlugin = definePlugin({
         method: z.string().optional().describe('HTTP method filter'),
         statusCode: z.number().optional().describe('HTTP status code filter'),
         errorsOnly: z.boolean().default(false).describe('Show only failed requests'),
+        limit: z.number().default(20).describe('Maximum number of results to return'),
         device: z.string().optional().describe('Device key or "all". Defaults to current device.'),
       }),
-      handler: async ({ urlPattern, method, statusCode, errorsOnly, device }) => {
+      handler: async ({ urlPattern, method, statusCode, errorsOnly, limit, device }) => {
         let results = getRequests(device);
         if (urlPattern) {
           const regex = new RegExp(urlPattern, 'i');
@@ -285,18 +273,19 @@ export const networkPlugin = definePlugin({
         if (method) results = results.filter((r) => r.method.toUpperCase() === method.toUpperCase());
         if (statusCode) results = results.filter((r) => r.status === statusCode);
         if (errorsOnly) results = results.filter((r) => r.error || (r.status && r.status >= 400));
-        return results.map((r) => ({
-          method: r.method,
-          url: r.url,
-          status: r.status,
-          error: r.error,
-          duration: r.endTime ? `${r.endTime - r.startTime}ms` : 'pending',
-        }));
+        return results
+          .slice(-limit)
+          .map((r) => {
+            const duration = r.endTime ? `${r.endTime - r.startTime}ms` : 'pending';
+            const status = r.error ? `ERR: ${r.error}` : `${r.status || '???'}`;
+            return `${r.method} ${r.url} → ${status} (${duration})`;
+          })
+          .join('\n');
       },
     });
 
     ctx.registerTool('clear_network_requests', {
-      description: 'Clear the network request buffer. Useful after a reload or when old requests are no longer relevant.',
+      description: 'Clear the network request buffer.',
       annotations: { destructiveHint: true, idempotentHint: true },
       parameters: z.object({
         device: z.string().optional().describe('Device key to clear, or omit for current device. Use "all" to clear all.'),
@@ -443,19 +432,17 @@ export const networkPlugin = definePlugin({
     ctx.registerResource('metro://network', {
       name: 'Network Requests',
       description: 'Recent network requests from the React Native app',
+      mimeType: 'text/plain',
       handler: async () => {
-        const all = getRequests();
-        const requests = all.slice(-20);
-        return JSON.stringify(
-          requests.map((r) => ({
-            method: r.method,
-            url: r.url,
-            status: r.status,
-            duration: r.endTime ? `${r.endTime - r.startTime}ms` : 'pending',
-          })),
-          null,
-          2
-        );
+        const requests = getRequests().slice(-20);
+        if (requests.length === 0) return '(no requests)';
+        return requests
+          .map((r) => {
+            const duration = r.endTime ? `${r.endTime - r.startTime}ms` : 'pending';
+            const status = r.error ? `ERR: ${r.error}` : `${r.status || '???'}`;
+            return `${formatTime(r.startTime)} ${r.method} ${r.url} → ${status} (${duration})`;
+          })
+          .join('\n');
       },
     });
   },

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { definePlugin } from '../plugin.js';
 import { DeviceBufferManager } from '../utils/buffer.js';
-import { formatTimestamp } from '../utils/format.js';
+import { formatTime } from '../utils/format.js';
 
 interface LogEntry {
   timestamp: number;
@@ -89,7 +89,7 @@ async function resolveRemoteObject(
     const result = (await cdpSend('Runtime.callFunctionOn', {
       objectId,
       functionDeclaration:
-        'function() { try { return JSON.stringify(this, null, 2); } catch(e) { return "[unserializable]"; } }',
+        'function() { try { return JSON.stringify(this); } catch(e) { return "[unserializable]"; } }',
       returnByValue: true,
     })) as Record<string, unknown>;
     const inner = result.result as Record<string, unknown> | undefined;
@@ -181,20 +181,21 @@ export const consolePlugin = definePlugin({
     });
 
     ctx.registerTool('get_console_logs', {
-      description: 'Get recent console output from the React Native app. Filter by log level and search text.',
+      description: 'Get recent console output. Filter by level or search text.',
       annotations: { readOnlyHint: true },
       parameters: z.object({
         level: z.enum(['log', 'warn', 'error', 'info', 'debug']).optional().describe('Filter by log level'),
         search: z.string().optional().describe('Search text to filter logs'),
         limit: z.number().default(50).describe('Maximum number of logs to return'),
-        summary: z.boolean().default(false).describe('Return summary with counts + last few entries'),
-        compact: z.boolean().default(false).describe('Return compact single-line format'),
+        since: z.number().optional().describe('Only return entries after this Unix timestamp (ms). Pass the timestamp of the last seen entry to fetch only new ones.'),
+        summary: z.boolean().default(false).describe('Return a one-line summary with counts'),
         device: z.string().optional().describe('Device key or "all" for aggregated logs. Defaults to current device.'),
       }),
-      handler: async ({ level, search, limit, summary, compact: isCompact, device }) => {
+      handler: async ({ level, search, limit, since, summary, device }) => {
         let logs = buffers.resolve(device, ctx.getActiveDeviceKey());
         if (level) logs = logs.filter((l) => l.level === level);
         if (search) logs = logs.filter((l) => l.message.toLowerCase().includes(search.toLowerCase()));
+        if (since !== undefined) logs = logs.filter((l) => l.timestamp > since);
 
         if (summary) {
           return ctx.format.summarize(
@@ -203,16 +204,7 @@ export const consolePlugin = definePlugin({
           );
         }
 
-        const result = logs.slice(-limit);
-        if (isCompact) {
-          return result.map((l) => `${formatTimestamp(l.timestamp)} [${l.level}] ${l.message}`).join('\n');
-        }
-
-        return result.map((l) => ({
-          time: formatTimestamp(l.timestamp),
-          level: l.level,
-          message: l.message,
-        }));
+        return logs.slice(-limit).map((l) => `${formatTime(l.timestamp)} [${l.level}] ${l.message}`).join('\n');
       },
     });
 
@@ -235,17 +227,10 @@ export const consolePlugin = definePlugin({
     ctx.registerResource('metro://logs', {
       name: 'Console Logs',
       description: 'Recent console output from the React Native app',
+      mimeType: 'text/plain',
       handler: async () => {
         const logs = buffers.resolve(undefined, ctx.getActiveDeviceKey()).slice(-20);
-        return JSON.stringify(
-          logs.map((l) => ({
-            time: formatTimestamp(l.timestamp),
-            level: l.level,
-            message: l.message,
-          })),
-          null,
-          2
-        );
+        return logs.map((l) => `${formatTime(l.timestamp)} [${l.level}] ${l.message}`).join('\n') || '(no logs)';
       },
     });
   },
