@@ -44,6 +44,24 @@ const LOCATIOND_AUTH_MAP: Record<number, string> = {
   4: 'denied',
 };
 
+// Services supported by `xcrun simctl privacy booted grant/revoke/reset`
+// Note: camera, bluetooth, face-id, tracking, notifications are NOT supported.
+const IOS_SIMCTL_PRIVACY_SERVICES = new Set([
+  'all',
+  'calendar',
+  'contacts-limited',
+  'contacts',
+  'location',
+  'location-always',
+  'photos-add',
+  'photos',
+  'media-library',
+  'microphone',
+  'motion',
+  'reminders',
+  'siri',
+]);
+
 function normalizeAndroidPermission(service: string): string {
   return service.startsWith('android.permission.')
     ? service
@@ -64,7 +82,7 @@ const permissionServiceParams = z.object({
   service: z
     .string()
     .describe(
-      'iOS: service name (e.g. "camera", "location"). Android: permission name (e.g. "CAMERA" or "android.permission.CAMERA").'
+      'iOS: simctl service (calendar, contacts, contacts-limited, location, location-always, microphone, motion, photos, photos-add, media-library, reminders, siri). Android: runtime permission (e.g. "CAMERA" or "android.permission.CAMERA").'
     ),
   platform: z.enum(['ios', 'android', 'auto']).default('auto').describe('Target platform'),
   bundleId: z
@@ -138,12 +156,19 @@ export const permissionsPlugin = definePlugin({
       return { p, id };
     }
 
+    function validateIosService(service: string): string | null {
+      if (IOS_SIMCTL_PRIVACY_SERVICES.has(service)) return null;
+      return `"${service}" not supported. Use: calendar, contacts, contacts-limited, location, location-always, microphone, motion, photos, photos-add, media-library, reminders, siri.`;
+    }
+
     function permissionMutationHandler(action: 'grant' | 'revoke') {
       return async ({ service, platform, bundleId }: z.infer<typeof permissionServiceParams>) => {
         const resolved = await resolveTarget(platform, bundleId);
         if (typeof resolved === 'string') return resolved;
         const { p, id } = resolved;
         if (p === 'ios') {
+          const serviceError = validateIosService(service);
+          if (serviceError) return serviceError;
           try {
             await ctx.exec(`xcrun simctl privacy booted ${action} "${service}" "${id}"`);
             return action === 'grant'
@@ -282,7 +307,7 @@ export const permissionsPlugin = definePlugin({
           .string()
           .optional()
           .describe(
-            'iOS: specific service to reset (e.g. "camera"); omit to reset all. Android: permission name (e.g. "CAMERA"); omit to reset all runtime permissions.'
+            'iOS: specific service to reset (e.g. "location"); omit to reset all. Android: permission name (e.g. "CAMERA"); omit to reset all runtime permissions.'
           ),
         platform: z.enum(['ios', 'android', 'auto']).default('auto').describe('Target platform'),
         bundleId: z
@@ -297,6 +322,10 @@ export const permissionsPlugin = definePlugin({
 
         if (p === 'ios') {
           const iosTarget = service ?? 'all';
+          if (service !== undefined) {
+            const serviceError = validateIosService(service);
+            if (serviceError) return serviceError;
+          }
           try {
             await ctx.exec(`xcrun simctl privacy booted reset "${iosTarget}" "${id}"`);
             return `Reset ${service ? `"${service}"` : 'all'} permissions for ${id} on iOS simulator.`;

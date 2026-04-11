@@ -86,11 +86,11 @@ Jump to: [Console](#console) · [Network](#network) · [Errors](#errors) · [Eva
 
 Inspect and manage app permissions on iOS Simulator and Android Emulator without leaving your workflow. Uses `xcrun simctl privacy` on iOS and `adb shell pm` on Android. Bundle ID / package name is auto-detected from config or the running app, or can be supplied explicitly.
 
-**iOS services:** `camera`, `microphone`, `photos`, `location`, `contacts`, `calendars`, `reminders`, `motion`, `health`, `homekit`, `medialibrary`, `bluetooth`, `network`, `speech`, `notifications`, `focus`, `tracking`
+**iOS services** (supported by `xcrun simctl privacy`): `calendar`, `contacts`, `contacts-limited`, `location`, `location-always`, `media-library`, `microphone`, `motion`, `photos`, `photos-add`, `reminders`, `siri`
 
-**Android permissions:** Standard `android.permission.*` strings — provide just the suffix (e.g. `CAMERA`) or the full string (e.g. `android.permission.CAMERA`).
+**Android permissions:** Runtime (dangerous) permissions only — the app must have declared the permission in its `AndroidManifest.xml`. Provide just the suffix (e.g. `CAMERA`) or the full string (e.g. `android.permission.CAMERA`). Install-time permissions (e.g. `INTERNET`) cannot be granted this way.
 
-- **`list_permissions`** — List all permission statuses for the app. Returns an object mapping service/permission → status (e.g. `granted`, `denied`, `undetermined`).
+- **`list_permissions`** — List all permission statuses for the app. Returns compact text: one `name=status` line per permission.
 - **`grant_permission`** — Grant a permission to the app.
 - **`revoke_permission`** — Revoke a permission from the app.
 - **`reset_permissions`** — Reset one or all permissions to their default state. On iOS, omit `service` to reset everything. On Android, omit `service` to reset all runtime permissions (falls back to `pm clear` on older devices).
