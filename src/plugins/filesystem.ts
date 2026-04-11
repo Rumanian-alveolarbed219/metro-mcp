@@ -5,8 +5,9 @@ const MAX_BYTES_DEFAULT = 50 * 1024;  // 50 KB
 const MAX_BYTES_CAP     = 1024 * 1024; // 1 MB
 
 // Matches one ls -la entry line on both macOS and Android busybox.
+// Handles both month-first (Apr 11 10:19) and day-first (11 Apr 10:19) date formats.
 const LS_LINE_RE =
-  /^([dlrwxbcpst\-]{10}[+@.]?)\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\w+\s+\d+\s+[\d:]+)/;
+  /^([dlrwxbcpst\-]{10}[+@.]?)\s+\d+\s+\S+\s+\S+\s+(\d+)\s+((?:\w{3}\s+\d+|\d+\s+\w{3})\s+[\d:]+)/;
 
 export const filesystemPlugin = definePlugin({
   name: 'filesystem',
@@ -66,7 +67,7 @@ export const filesystemPlugin = definePlugin({
       for (const line of output.trim().split('\n')) {
         if (!line.trim() || line.startsWith('total ')) continue;
         const match = line.match(
-          /^([dlrwxbcpst\-]{10}[+@.]?)\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(\w+\s+\d+\s+[\d:]+)\s+(.+)$/
+          /^([dlrwxbcpst\-]{10}[+@.]?)\s+\d+\s+\S+\s+\S+\s+(\d+)\s+((?:\w{3}\s+\d+|\d+\s+\w{3})\s+[\d:]+)\s+(.+)$/
         );
         if (!match) continue;
         const [, perms, sizeStr, modified, name] = match;
