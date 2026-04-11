@@ -106,8 +106,9 @@ export const environmentPlugin = definePlugin({
           return await ctx.evalInApp(
             `(function() {
   try {
-    return require('expo-constants').default.expoConfig ||
-           require('expo-constants').default.manifest;
+    var c = globalThis.expo && globalThis.expo.modules && globalThis.expo.modules.ExponentConstants;
+    if (!c) return null;
+    return c.expoConfig || c.manifest || null;
   } catch(e) { return null; }
 })()`,
           );
