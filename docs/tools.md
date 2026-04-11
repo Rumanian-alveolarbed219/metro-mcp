@@ -1,6 +1,6 @@
 # Tools Reference
 
-Jump to: [Console](#console) · [Network](#network) · [Errors](#errors) · [Evaluate](#evaluate) · [Device](#device) · [Redux](#redux) · [Components](#components) · [Storage](#storage) · [Bundle](#bundle) · [Simulator](#simulator) · [Deep Link](#deep-link) · [UI Interact](#ui-interact) · [Navigation](#navigation) · [Accessibility](#accessibility) · [Profiler](#profiler) · [Test Recorder](#test-recorder) · [Commands](#commands) · [Resources](#resources) · [Prompts](#prompts)
+Jump to: [Console](#console) · [Network](#network) · [Errors](#errors) · [Evaluate](#evaluate) · [Device](#device) · [Redux](#redux) · [Components](#components) · [Storage](#storage) · [Bundle](#bundle) · [Simulator](#simulator) · [Deep Link](#deep-link) · [Permissions](#permissions) · [UI Interact](#ui-interact) · [Navigation](#navigation) · [Accessibility](#accessibility) · [Profiler](#profiler) · [Test Recorder](#test-recorder) · [Commands](#commands) · [Resources](#resources) · [Prompts](#prompts)
 
 ## Console
 
@@ -81,6 +81,20 @@ Jump to: [Console](#console) · [Network](#network) · [Errors](#errors) · [Eva
 
 - **`open_deeplink`** — Open a URL or deep link on the device.
 - **`list_url_schemes`** — List registered URL schemes.
+
+## Permissions
+
+Inspect and manage app permissions on iOS Simulator and Android Emulator without leaving your workflow. Uses `xcrun simctl privacy` on iOS and `adb shell pm` on Android. Bundle ID / package name is auto-detected from config or the running app, or can be supplied explicitly.
+
+**iOS services** (supported by `xcrun simctl privacy`): `calendar`, `contacts`, `contacts-limited`, `location`, `location-always`, `media-library`, `microphone`, `motion`, `photos`, `photos-add`, `reminders`, `siri`
+
+**Android permissions:** Runtime (dangerous) permissions only — the app must have declared the permission in its `AndroidManifest.xml`. Provide just the suffix (e.g. `CAMERA`) or the full string (e.g. `android.permission.CAMERA`). Install-time permissions (e.g. `INTERNET`) cannot be granted this way.
+
+- **`list_permissions`** — List all permission statuses for the app. Returns compact text: one `name=status` line per permission.
+- **`grant_permission`** — Grant a permission to the app.
+- **`revoke_permission`** — Revoke a permission from the app.
+- **`reset_permissions`** — Reset one or all permissions to their default state. On iOS, omit `service` to reset everything. On Android, omit `service` to reset all runtime permissions (falls back to `pm clear` on older devices).
+- **`open_app_settings`** — Open the app's system settings page. On iOS, opens the Settings panel for the frontmost app. On Android, requires a bundle ID / package name.
 
 ## UI Interact
 

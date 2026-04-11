@@ -106,6 +106,7 @@ metro-mcp connects to your running Metro dev server the same way Chrome DevTools
 | **storage** | 3 | AsyncStorage reading |
 | **simulator** | 6 | iOS simulator / Android device control |
 | **deeplink** | 2 | Cross-platform deep link testing |
+| **permissions** | 5 | Inspect and manage app permissions on iOS Simulator and Android Emulator |
 | **ui-interact** | 6 | UI automation (tap, swipe, type) |
 | **navigation** | 4 | React Navigation / Expo Router state |
 | **accessibility** | 3 | Accessibility auditing |
