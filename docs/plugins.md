@@ -5,7 +5,7 @@ metro-mcp is plugin-based. You can extend it with local files or npm packages.
 ## Creating a plugin
 
 ```typescript
-import { definePlugin } from 'metro-mcp/plugin';
+import { definePlugin } from 'metro-mcp';
 import { z } from 'zod';
 
 export default definePlugin({
@@ -67,3 +67,30 @@ export default defineConfig({
 ```
 
 npm packages use the `metro-mcp-plugin-*` naming convention.
+
+## Loading plugins without a config file
+
+Load plugins via CLI or env var — useful when you want to load a plugin without creating a config file, or for clients that don't support MCP roots:
+
+```bash
+# Single plugin
+bunx metro-mcp --plugin ./my-plugin.ts
+
+# Multiple plugins (colon-separated env var)
+METRO_MCP_PLUGINS=./plugin-a.ts:metro-mcp-plugin-foo bunx metro-mcp
+```
+
+In an MCP server config:
+
+```json
+{
+  "mcpServers": {
+    "metro-mcp": {
+      "command": "bunx",
+      "args": ["metro-mcp", "--plugin", "./my-plugin.ts"]
+    }
+  }
+}
+```
+
+Plugins specified this way are appended after any plugins defined in the config file.

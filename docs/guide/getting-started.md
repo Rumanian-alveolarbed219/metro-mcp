@@ -39,6 +39,23 @@ Or use the one-click install buttons:
 [![Install in VS Code](https://img.shields.io/badge/Install_in-VS_Code-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=metro-mcp&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22metro-mcp%22%5D%2C%22env%22%3A%7B%7D%7D)
 [![Install in Cursor](https://img.shields.io/badge/Install_in-Cursor-000000?style=flat-square&logoColor=white)](https://cursor.com/en/install-mcp?name=metro-mcp&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIm1ldHJvLW1jcCJdLCJlbnYiOnt9fQ==)
 
+### With a config file
+
+In Claude Code, Cursor, and VS Code, metro-mcp automatically discovers `metro-mcp.config.ts` (or `.js`) from your project root — no extra configuration needed. Just add the file and it will be picked up.
+
+```bash
+# Install metro-mcp as usual
+claude mcp add metro-mcp -- bunx metro-mcp
+```
+
+If your client doesn't support MCP roots, pass the config path explicitly:
+
+```bash
+claude mcp add metro-mcp -- bunx metro-mcp --config /Users/you/my-project/metro-mcp.config.ts
+```
+
+See [Configuration](/configuration) for all options.
+
 ### With a custom Metro port
 
 ```bash
