@@ -10,6 +10,26 @@ export interface CommunityPlugin {
   searchText: string
 }
 
+function sanitizeExternalUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+
+  const normalized = trimmed.startsWith('git+') ? trimmed.slice(4) : trimmed
+
+  try {
+    const parsed = new URL(normalized)
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString()
+    }
+  } catch {
+    return undefined
+  }
+
+  return undefined
+}
+
 export default {
   async load(): Promise<CommunityPlugin[]> {
     const res = await fetch(
@@ -41,8 +61,8 @@ export default {
           date: p.date as string,
           links: {
             npm: `https://www.npmjs.com/package/${name}`,
-            homepage: p.links?.homepage as string | undefined,
-            repository: p.links?.repository as string | undefined,
+            homepage: sanitizeExternalUrl(p.links?.homepage),
+            repository: sanitizeExternalUrl(p.links?.repository),
           },
           searchText: `${name} ${description} ${author}`.toLowerCase(),
         }
