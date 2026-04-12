@@ -5,10 +5,38 @@ import type { CommunityPlugin } from '../data/plugins.data'
 
 const query = ref('')
 
-const filtered = computed(() => {
+type CommunityPluginWithSafeLinks = CommunityPlugin & {
+  safeLinks: { repository?: string; homepage?: string }
+}
+
+function sanitizeExternalUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined
+
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return parsed.toString()
+    }
+  } catch {
+    return undefined
+  }
+
+  return undefined
+}
+
+const filtered = computed<CommunityPluginWithSafeLinks[]>(() => {
   const q = query.value.toLowerCase().trim()
-  if (!q) return plugins
-  return plugins.filter((p: CommunityPlugin) => p.searchText.includes(q))
+  const matching = !q
+    ? plugins
+    : plugins.filter((p: CommunityPlugin) => p.searchText.includes(q))
+
+  return matching.map((plugin: CommunityPlugin) => ({
+    ...plugin,
+    safeLinks: {
+      repository: sanitizeExternalUrl(plugin.links.repository),
+      homepage: sanitizeExternalUrl(plugin.links.homepage),
+    },
+  }))
 })
 
 function formatDate(iso: string) {
@@ -62,10 +90,10 @@ function formatDate(iso: string) {
           <span v-if="plugin.date" class="plugin-date">{{ formatDate(plugin.date) }}</span>
         </div>
 
-        <div v-if="plugin.links.repository || plugin.links.homepage" class="plugin-links">
+        <div v-if="plugin.safeLinks.repository || plugin.safeLinks.homepage" class="plugin-links">
           <a
-            v-if="plugin.links.repository"
-            :href="plugin.links.repository"
+            v-if="plugin.safeLinks.repository"
+            :href="plugin.safeLinks.repository"
             target="_blank"
             rel="noopener"
             class="plugin-link"
@@ -73,8 +101,8 @@ function formatDate(iso: string) {
             repository
           </a>
           <a
-            v-if="plugin.links.homepage"
-            :href="plugin.links.homepage"
+            v-if="plugin.safeLinks.homepage"
+            :href="plugin.safeLinks.homepage"
             target="_blank"
             rel="noopener"
             class="plugin-link"
